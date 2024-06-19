@@ -58,6 +58,8 @@ func cfgMassif(cmd *CmdCtx, cCtx *cli.Context) error {
 	mmrIndex := cCtx.Uint64("mmrindex")
 	massifIndex := cCtx.Uint64("massif")
 
+	fmt.Printf("tenant: %s mmrindex: %d  massif %d\n", tenant, mmrIndex, massifIndex)
+
 	// mmrIndex zero is always going to be massifIndex 0 so we treat this the
 	// same as though the massif option had been supplied as 0
 	if massifIndex == uint64(0) && mmrIndex == uint64(0) {

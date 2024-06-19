@@ -39,7 +39,7 @@ func NewNodeScanCmd() *cli.Command {
 			count := cmd.massif.Count()
 			for i := uint64(0); i < count; i++ {
 				entry := cmd.massif.Data[start+i*massifs.ValueBytes : start+i*massifs.ValueBytes+massifs.ValueBytes]
-				if bytes.Compare(entry, targetValue) == 0 {
+				if bytes.Equal(entry, targetValue) {
 					fmt.Printf("%d\n", i+cmd.massif.Start.FirstIndex)
 					return nil
 				}
