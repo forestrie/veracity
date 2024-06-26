@@ -3,7 +3,6 @@ package veracity
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -14,21 +13,12 @@ import (
 
 type Node struct {
 	prefix      []byte
+	pdepth      int
 	terminating bool
 	Left        *Node
 	Right       *Node
 	Value       string
 	Hash        string
-}
-
-func slice2Uint64(slice []byte) uint64 {
-	return binary.BigEndian.Uint64(slice)
-}
-
-func uint642slice(n uint64) []byte {
-	b := make([]byte, 32)
-	binary.BigEndian.PutUint64(b, n)
-	return b
 }
 
 func (n *Node) isInternal() bool {
@@ -37,6 +27,10 @@ func (n *Node) isInternal() bool {
 
 func (n *Node) isTerminating() bool {
 	return n.terminating
+}
+
+func (n *Node) isLeaf() bool {
+	return !n.isTerminating() && !n.isInternal()
 }
 
 type BinaryUrkelTrie struct {
@@ -49,9 +43,11 @@ func NewBinaryUrkelTrie() *BinaryUrkelTrie {
 
 func newLeafFromLeaf(leaf *Node) *Node {
 	return &Node{
-		Value:  leaf.Value,
-		prefix: leaf.prefix,
-		Hash:   leaf.Hash,
+		Value:       leaf.Value,
+		prefix:      leaf.prefix,
+		pdepth:      leaf.pdepth,
+		Hash:        leaf.Hash,
+		terminating: leaf.terminating,
 	}
 }
 
@@ -61,7 +57,7 @@ func hash(data string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func (t *BinaryUrkelTrie) Insert(bkey, value string) {
+func (t *BinaryUrkelTrie) Insert(key []byte, value string) {
 	//binaryKey := toBinaryString(key)
 
 	// if len(bkey) != 32 {
@@ -69,33 +65,12 @@ func (t *BinaryUrkelTrie) Insert(bkey, value string) {
 	// }
 
 	nn := &Node{
-		prefix: []byte(bkey),
+		prefix: key,
+		pdepth: len(key) * 8,
 		Value:  value,
 		Hash:   hash(value),
 	}
 	t.Root = t.insert(t.Root, nn, 0)
-}
-
-func toBinaryString(key string) string {
-	var binaryStr string
-	for i := 0; i < len(key); i++ {
-		binaryStr += fmt.Sprintf("%08b", key[i])
-	}
-	return binaryStr
-}
-
-func commonPrefixS(a, b string) int {
-	prefix := 0
-	for i := 0; i < len(a); i++ {
-		if i >= len(b) {
-			return prefix
-		}
-		if b[i] != a[i] {
-			return prefix
-		}
-		prefix++
-	}
-	return prefix
 }
 
 func prefixForDepth(depth int, prefix []byte, lastSignificant *int) []byte {
@@ -105,6 +80,10 @@ func prefixForDepth(depth int, prefix []byte, lastSignificant *int) []byte {
 			break
 		}
 		b[i] = bb
+	}
+
+	if depth/8 == len(prefix) {
+		return b
 	}
 
 	b[depth/8] = (prefix[depth/8] >> (depth % 8)) << (depth % 8)
@@ -120,9 +99,59 @@ func prefixForDepth(depth int, prefix []byte, lastSignificant *int) []byte {
 	return b
 }
 
+// func (t *BinaryUrkelTrie) insert(node *Node, new *Node, depth int) *Node {
+// 	// if we have empty tree just return the leaf
+// 	if node == nil {
+// 		return new
+// 	}
+
+// 	// if we hit a leaf find out appropriate depth and create a merge node
+
+// 	if node.isLeaf() && new.isLeaf() {
+// 		tdepth := commonPrefix(node.prefix, new.prefix)
+// 		left := !bit(tdepth, new.prefix)
+// 		nn := &Node{
+// 			prefix:      node.prefix,
+// 			pdepth:      tdepth,
+// 			terminating: false,
+// 		}
+// 		if left {
+// 			nn.Left = new
+// 			nn.Right = node
+// 		} else {
+// 			nn.Left = node
+// 			nn.Right = new
+// 		}
+// 		return nn
+// 	}
+
+// 	// if it's internal node we go deeper until we reach appropriate depth
+// 	if node.isInternal() {
+// 		for depth != new.pdepth {
+// 			left := !bit(depth, new.prefix)
+// 			if left {
+// 				node.Left = t.insert(node.Left, new, depth+1)
+// 				if node.Left.isLeaf() {
+// 					break
+// 				}
+// 			} else {
+// 				node.Right = t.insert(node.Right, new, depth+1)
+// 				if node.Right.isLeaf() {
+// 					break
+// 				}
+// 			}
+// 		}
+// 	}
+
+// 	if node.isTerminating() {
+// 		return node
+// 	}
+
+// 	return node
+// }
+
 func (t *BinaryUrkelTrie) insert(node *Node, new *Node, depth int) *Node {
 	if node == nil {
-		//node = new
 		return new
 	}
 
@@ -130,29 +159,16 @@ func (t *BinaryUrkelTrie) insert(node *Node, new *Node, depth int) *Node {
 	if !new.isInternal() && !new.isTerminating() && node.isTerminating() {
 		return new
 	}
-	// if len(key) == 0 {
-	// 	node.Value = value
-	// 	node.Hash = hash(value)
-	// 	return node
-	// }
 
 	if bytes.Equal(new.prefix, node.prefix) && depth == len(node.prefix)*8 {
 		return new
 	}
 	//targetDepth := commonPrefixS(node.prefix, new.prefix)
-	tdepth := commonPrefix(node.prefix, new.prefix)
-	//tidx := (tdepth / 8)
-	// mask := 0x1 << (7 - (tdepth - tidx*8))
-	// r := new.prefix[tidx] & byte(mask)
-	// fmt.Printf("1 %s\n", toBinaryString(string(rune(node.prefix))))
-	// fmt.Printf("2 %s\n", toBinaryString(string(rune(new.prefix))))
-	// fmt.Printf("%s\n", toBinaryString(string(uint642slice(new.prefix)[tidx])))
-	// fmt.Printf("%s\n", toBinaryString(string([]byte{byte(mask)})))
-	// fmt.Printf("---- %d: %d shifting by: %d %t\n", tdepth, tidx, 7-(tdepth-tidx*8), r == 0x0)
+	tdepth := min(commonPrefix(node.prefix, new.prefix), node.pdepth)
 
-	prefixNext := tdepth + 1
-	if node.isTerminating() || node.isInternal() || new.isInternal() {
-		prefixNext = min(tdepth+1, depth+1)
+	prefixNext := tdepth
+	if node.isTerminating() || node.isInternal() || new.isInternal() || (node == t.Root && node.isInternal()) {
+		prefixNext = min(tdepth, depth)
 	}
 
 	left := !bit(prefixNext, new.prefix)
@@ -160,40 +176,87 @@ func (t *BinaryUrkelTrie) insert(node *Node, new *Node, depth int) *Node {
 	one := 1
 	zero := 0
 
+	// if node.isInternal() {
+	// 	if left {
+	// 		node.Left = t.insert(node.Left, new, depth+1)
+	// 	} else {
+	// 		node.Right = t.insert(node.Right, new, depth+1)
+	// 	}
+	// } else if node.isTerminating() && new.isInternal() && depth == new.pdepth {
+	// 	return new
+	// } else if node.isTerminating() {
+
+	// 	if new.isInternal() {
+	// 		n = terminatingNode(prefixForDepth(depth+1, new.prefix, nn), depth+1)
+	// 	}
+	// 	node.terminating = false
+	// 	n = t.insert(n, new, depth+1)
+	// 	o = terminatingNode(prefixForDepth(depth+1, new.prefix, oo), depth+1)
+	// } else {
+	// 	var newNode *Node
+	// 	if left {
+	// 		newNode = &Node{
+
+	// 			// shift max int and then and it - cut off targetDepth most significant
+	// 			prefix: prefixForDepth(tdepth, new.prefix, nil),
+	// 			pdepth: tdepth,
+	// 			Left:   new,
+	// 			Right:  newLeafFromLeaf(node),
+	// 			Hash:   hash(new.Hash + node.Hash),
+	// 		}
+	// 	} else {
+	// 		newNode = &Node{
+	// 			prefix: prefixForDepth(tdepth, new.prefix, nil), //node.prefix[:targetDepth],
+	// 			pdepth: tdepth,
+	// 			Left:   newLeafFromLeaf(node),
+	// 			Right:  new,
+	// 			Hash:   hash(node.Hash + new.Hash),
+	// 		}
+	// 	}
+
+	// 	nodeToDoubleTerminating(node, new.prefix, depth)
+	// 	if depth != tdepth {
+	// 		return t.insert(node, newNode, depth)
+	// 	}
+	// }
+
 	if left { //new.prefix[targetDepth] == '0' {
 		if node.isInternal() {
 			// we traverse deeper
 			node.Left = t.insert(node.Left, new, depth+1)
 		} else if node.isTerminating() {
 			// replace terminating node
+			if new.isInternal() && depth == new.pdepth {
+				return new
+			}
+
+			if new.isInternal() {
+				node.Left = terminatingNode(prefixForDepth(depth+1, new.prefix, &zero), depth+1)
+			}
+
 			node.terminating = false
 			node.Left = t.insert(node.Left, new, depth+1)
-			node.Right = &Node{
-				prefix:      prefixForDepth(depth+1, new.prefix, &one), //(node.prefix << 1) + 1, // "1",
-				terminating: true,
-			}
+			node.Right = terminatingNode(prefixForDepth(depth+1, new.prefix, &one), depth+1)
 		} else {
 			// we move the curent one to the side
 			newNode := &Node{
 
 				// shift max int and then and it - cut off targetDepth most significant
-				prefix: prefixForDepth(tdepth, new.prefix, nil), // node.prefix[:tdepth],
+				prefix: prefixForDepth(tdepth, new.prefix, nil),
+				pdepth: tdepth,
 				Left:   new,
 				Right:  newLeafFromLeaf(node),
 				Hash:   hash(new.Hash + node.Hash),
 			}
 			// as above
-			node.prefix = prefixForDepth(depth, new.prefix, nil)
-			node.Value = ""
-			node.Hash = ""
-			node.Left = &Node{
-				prefix:      prefixForDepth(depth+1, new.prefix, &zero),
-				terminating: true,
-			}
-			node.Right = &Node{
-				prefix:      prefixForDepth(depth+1, new.prefix, &one),
-				terminating: true,
-			}
+			nodeToDoubleTerminating(node, new.prefix, depth)
+			// node.terminating = false
+			// node.prefix = prefixForDepth(depth, new.prefix, nil)
+			// node.pdepth = depth
+			// node.Value = ""
+			// node.Hash = ""
+			// node.Left = terminatingNode(prefixForDepth(depth+1, new.prefix, &zero), depth+1)
+			// node.Right = terminatingNode(prefixForDepth(depth+1, new.prefix, &one), depth+1)
 
 			if depth != tdepth {
 				return t.insert(node, newNode, depth)
@@ -205,48 +268,45 @@ func (t *BinaryUrkelTrie) insert(node *Node, new *Node, depth int) *Node {
 		if node.isInternal() {
 			node.Right = t.insert(node.Right, new, depth+1)
 		} else if node.isTerminating() {
+			// replace terminating node
+			if new.isInternal() && depth == new.pdepth {
+				return new
+			}
+			if new.isInternal() {
+				node.Right = terminatingNode(prefixForDepth(depth+1, new.prefix, &one), depth+1)
+			}
 			node.terminating = false
 			node.Right = t.insert(node.Right, new, depth+1)
-			node.Left = &Node{
-				prefix:      prefixForDepth(depth+1, new.prefix, &zero), //node.prefix + "0",
-				terminating: true,
-			}
+			node.Left = terminatingNode(prefixForDepth(depth+1, new.prefix, &zero), depth+1)
 		} else {
 			// we move the curent one to the side
 
 			newNode := &Node{
 				prefix: prefixForDepth(tdepth, new.prefix, nil), //node.prefix[:targetDepth],
+				pdepth: tdepth,
 				Left:   newLeafFromLeaf(node),
 				Right:  new,
 				Hash:   hash(node.Hash + new.Hash),
 			}
-			node.prefix = prefixForDepth(depth, new.prefix, nil) //node.prefix[:depth]
-			node.Value = ""
-			node.Hash = ""
-			node.Left = &Node{
-				prefix:      prefixForDepth(depth+1, new.prefix, &zero), //node.prefix + "0",
-				terminating: true,
-			}
-			node.Right = &Node{
-				prefix:      prefixForDepth(depth+1, new.prefix, &one), //node.prefix + "1",
-				terminating: true,
-			}
 
+			nodeToDoubleTerminating(node, new.prefix, depth)
+			// node.terminating = false
+			// node.prefix = prefixForDepth(depth, new.prefix, nil) //node.prefix[:depth]
+			// node.pdepth = depth
+			// node.Value = ""
+			// node.Hash = ""
+			// node.Left = terminatingNode(prefixForDepth(depth+1, new.prefix, &zero), depth+1)
+			// node.Right = terminatingNode(prefixForDepth(depth+1, new.prefix, &one), depth+1)
 			if depth != tdepth { //len(newNode.prefix) {
 				return t.insert(node, newNode, depth)
 			}
 
 			return newNode
-
-			// node.Left = &Node{
-			// 	Value:  node.Value,
-			// 	Hash:   node.Hash,
-			// 	prefix: node.prefix,
-			// }
-			// node.Value = ""
-			// node.prefix = new.Value[:depth]
-			// node.Right = t.insert(node.Right, new, depth+1)
 		}
+	}
+
+	if node.isTerminating() {
+		return node
 	}
 
 	nodeHash := node.Value
@@ -258,26 +318,64 @@ func (t *BinaryUrkelTrie) insert(node *Node, new *Node, depth int) *Node {
 	}
 	node.Hash = hash(nodeHash)
 
+	node.pdepth = depth
+
 	return node
 }
 
-func (t *BinaryUrkelTrie) Get(key string) (string, bool) {
-	binaryKey := toBinaryString(key)
+func nodeToDoubleTerminating(node *Node, prefix []byte, depth int) {
+	one := 1
+	zero := 0
+	node.terminating = false
+	node.prefix = prefixForDepth(depth, prefix, nil)
+	node.pdepth = depth
+	node.Value = ""
+	node.Hash = ""
+	node.Left = terminatingNode(prefixForDepth(depth+1, prefix, &zero), depth+1)
+	node.Right = terminatingNode(prefixForDepth(depth+1, prefix, &one), depth+1)
+}
+
+func terminatingNode(prefix []byte, depth int) *Node {
+	return &Node{
+		prefix:      prefix,
+		pdepth:      depth,
+		terminating: true,
+		Hash:        "0000000000000000000000000000000000000000000000000000000000000000",
+	}
+}
+
+func (t *BinaryUrkelTrie) GetPath(key []byte) ([]string, string, bool) {
+	path := []string{}
 	node := t.Root
-	for i := 0; i < len(binaryKey); i++ {
+	for i := 0; i <= len(key)*8; i++ {
+
 		if node == nil {
-			return "", false
+			return path, "", false
 		}
-		if binaryKey[i] == '0' {
-			node = node.Left
-		} else {
+
+		path = append(path, node.Hash)
+		// this is leaf value we have to break out
+		if node.Value != "" {
+			break
+		}
+
+		if node.isTerminating() {
+			return path, "", false
+		}
+
+		if bit(i, key) {
 			node = node.Right
+		} else {
+			node = node.Left
 		}
 	}
-	if node == nil || node.Value == "" {
-		return "", false
+
+	//path = append(path, node.Hash)
+	if !bytes.Equal(node.prefix, key) {
+		return path, node.Value, false
 	}
-	return node.Value, true
+
+	return path, node.Value, true
 }
 
 // const (
@@ -355,9 +453,9 @@ func (t *BinaryUrkelTrie) Get(key string) (string, bool) {
 // }
 
 func bit(pos int, value []byte) bool {
-	b := value[(pos-1)/8]
+	b := value[(pos)/8]
 	r := (pos) % 8
-	m := (1 << r)
+	m := 1 << (7 - r)
 	return b&byte(m) != 0
 }
 
@@ -664,7 +762,7 @@ func NewUrkelCommand() *cli.Command {
 			for i := uint64(0); i < count; i++ {
 				val := cmd.massif.Data[start+i*massifs.ValueBytes : start+i*massifs.ValueBytes+massifs.ValueBytes]
 				key := cmd.massif.Data[start+i*massifs.TrieKeyBytes : start+i*massifs.TrieKeyBytes+massifs.TrieKeyBytes]
-				urkel.Insert(hex.EncodeToString(key), hex.EncodeToString(val))
+				urkel.Insert(key, hex.EncodeToString(val))
 				//urkel = AddToUrkle(CreateLeafithKeyValue(key, val), urkel, 0, 0)
 
 				fmt.Printf("%d: %s %d %d\n", i+cmd.massif.Start.FirstIndex, hex.EncodeToString(key), len(key), math.Ilogb(float64(len(key))*8))
