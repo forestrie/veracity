@@ -46,7 +46,6 @@ func AddCommands(app *cli.App) *cli.App {
 	// Note: this command is not implemented
 	// app.Commands = append(app.Commands, NewProveCmd())
 	app.Commands = append(app.Commands, NewNodeScanCmd())
-	app.Commands = append(app.Commands, NewUrkelCommand())
 	app.Commands = append(app.Commands, NewDiagCmd())
 	app.Commands = append(app.Commands, NewEventDiagCmd())
 	app.Commands = append(app.Commands, NewMassifsCmd())

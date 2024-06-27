@@ -65,6 +65,7 @@ tasks:
     desc: run the unit tests
     cmds:
       - task: gotest:go:unit
+      - task: gotest:go:urkel
 
   test:integration:
     desc: run the azurite integration tests

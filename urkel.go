@@ -1,14 +1,11 @@
+//go:build urkel
+
 package veracity
 
 import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
-	"math"
-
-	"github.com/datatrails/go-datatrails-merklelog/massifs"
-	"github.com/urfave/cli/v2"
 )
 
 type Node struct {
@@ -330,41 +327,4 @@ func commonPrefix(node, value []byte) int {
 	}
 
 	return commonBytes*8 + commonBits
-}
-
-// NewUrkelCommand implements a sub command which construcst an urkel trie
-func NewUrkelCommand() *cli.Command {
-	return &cli.Command{Name: "urkel",
-		Usage: "construct an urkel from massif",
-		Flags: []cli.Flag{
-			&cli.Int64Flag{
-				Name: "massif", Aliases: []string{"m"},
-			},
-			&cli.StringFlag{
-				Name: "value", Aliases: []string{"v"},
-			},
-			&cli.BoolFlag{Name: "massif-relative", Aliases: []string{"r"}},
-		},
-		Action: func(cCtx *cli.Context) error {
-			var err error
-			cmd := &CmdCtx{}
-
-			if err = cfgMassif(cmd, cCtx); err != nil {
-				return err
-			}
-
-			start := cmd.massif.LogStart()
-			count := cmd.massif.Count()
-			urkel := NewBinaryUrkelTrie()
-			for i := uint64(0); i < count; i++ {
-				val := cmd.massif.Data[start+i*massifs.ValueBytes : start+i*massifs.ValueBytes+massifs.ValueBytes]
-				key := cmd.massif.Data[start+i*massifs.TrieKeyBytes : start+i*massifs.TrieKeyBytes+massifs.TrieKeyBytes]
-				urkel.Insert(key, hex.EncodeToString(val))
-
-				fmt.Printf("%d: %s %d %d\n", i+cmd.massif.Start.FirstIndex, hex.EncodeToString(key), len(key), math.Ilogb(float64(len(key))*8))
-
-			}
-			return nil
-		},
-	}
 }
