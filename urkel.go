@@ -92,6 +92,13 @@ func prefixForDepth(depth int, prefix []byte, lastSignificant *int) []byte {
 	return b
 }
 
+// insert inserts new node into a tree
+// two leafs that share a common key prefix will end up
+// on the depth equal to lengt of the commmon part of key - essentially
+// ending up where they would normally meet in the tree
+// all the missing branches will be filled in by terminating nodes
+// with hash set to all zero
+// this implementation follows the design notes in: https://handshake.org/files/handshake.txt
 func (t *BinaryUrkelTrie) insert(node *Node, new *Node, depth int) *Node {
 
 	// if we have an nil noce we just replace
