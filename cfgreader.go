@@ -16,20 +16,20 @@ const (
 
 // cfgReader establishes the blob read only data accessor
 // only azure blob storage is supported. Both emulated and produciton.
-func cfgReader(cmd *CmdCtx, cCtx *cli.Context) error {
+func cfgReader(cmd *CmdCtx, cCtx *cli.Context) (azblob.Reader, error) {
 	var err error
 	var reader azblob.Reader
 
 	if cmd.log == nil {
 		if err = cfgLogging(cmd, cCtx); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	container := cCtx.String("container")
 
 	account := cCtx.String("account")
-	url := cCtx.String("url")
+	url := cCtx.String("data-url")
 	envAuth := cCtx.Bool("envauth")
 
 	if account == "" && url == "" {
@@ -47,10 +47,9 @@ func cfgReader(cmd *CmdCtx, cCtx *cli.Context) error {
 		// reader, err := azblob.NewAzurite(url, container)
 		reader, err = azblob.NewDev(azblob.NewDevConfigFromEnv(), container)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		cmd.reader = reader
-		return nil
+		return reader, nil
 	}
 
 	if url == "" {
@@ -63,17 +62,15 @@ func cfgReader(cmd *CmdCtx, cCtx *cli.Context) error {
 	if envAuth {
 		reader, err = azblob.NewDev(azblob.NewDevConfigFromEnv(), container)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		cmd.reader = reader
-		return nil
+		return reader, nil
 	}
 
 	reader, err = azblob.NewReaderNoAuth(url, azblob.WithContainer(container), azblob.WithAccountName(account))
 	if err != nil {
-		return fmt.Errorf("failed to connect to blob store: %v", err)
+		return nil, fmt.Errorf("failed to connect to blob store: %v", err)
 	}
-	cmd.reader = reader
 
-	return nil
+	return reader, nil
 }

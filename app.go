@@ -23,7 +23,10 @@ func NewApp() *cli.App {
 			},
 
 			&cli.StringFlag{
-				Name: "url", Aliases: []string{"u"},
+				Name: "data-url", Aliases: []string{"u"},
+			},
+			&cli.StringFlag{
+				Name: "data-local", Aliases: []string{"l"},
 			},
 			&cli.StringFlag{
 				Name: "tenant", Aliases: []string{"t"},
