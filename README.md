@@ -39,8 +39,8 @@ For example, for the Linux or Darwin OS the following steps would be conventiona
 ```
 PLATFORM=Darwin
 ARCH=arm64
-VERSION=0.0.1
-curl -sLO https://github.com/datatrails/veracity/releases/download/v${VERSION}/veracity_${PLATFORM}_${ARCH}.tar.gz
+curl -sLO https://github.com/datatrails/veracity/releases/latest/download/veracity_${PLATFORM}_${ARCH}.tar.gz
+tar -xf veracity_${PLATFORM}_${ARCH}.tar.gz
 chmod +x ./veracity
 ./veracity --help
 ```
@@ -59,55 +59,6 @@ which veracity
 
 The last command will echo the location of the veracity binary if $HOME/bin is
 in your $PATH
-
-# A simple first example using `nodescan`
-
-
-`nodescan` is a command which searches for a leaf entry in the verifiable data by linearly
-scanning the log. This is typically used in development as a diagnostic aid.
-It can also be used for some audit use cases.
-
-Find a leaf in the log by full audit. The Merkle Leaf value for any DataTrails event
-can be found from its event details page in the UI. Follow the "Merkle Log Entry" link.
-
-```
-URL=https://app.datatrails.ai/verifiabledata
-TENANT=tenant/7dfaa5ef-226f-4f40-90a5-c015e59998a8
-LEAF=2b8ecdee967d976a31bac630036d6b183bd40913f969b47b438d4614ce7fa155
-
-veracity --data-url $URL --tenant=$TENANT nodescan -v $LEAF
-```
-
-This command will report the MMR index of that leaf as `10`
-
-The conventional way to visualise the MMR index is like this
-
-```
-
-     6
-   /  \
-  2    5     9
- /\   / \   / \  
-0  1  3  4 7  8  10  MMR INDEX
-
-0  1  2  3 5  5   6 LEAF INDEX
-```
-
-And that shows that the leaf, which has MMR index `10` is the *7'th* event ever
-recorded in that tenant.
-
-The results of this command can be independently checked by downloading the
-public verifiable data for the DataTrails tenant on which the event was
-recorded.
-
-```
-curl -H "x-ms-blob-type: BlockBlob" -H "x-ms-version: 2019-12-12" https://app.datatrails.ai/verifiabledata/merklelogs/v1/mmrs/tenant/7dfaa5ef-226f-4f40-90a5-c015e59998a8/0/massifs/0000000000000000.log -o mmr.log
-```
-
-Using this [online hexeditor](https://hexed.it/) the `mmr.log` can be uploaded
-and you can repeat the search performed above using its interface.
-
-The format of the log is described in detail in ["Navigating the Merkle Logs"](https://docs.datatrails.ai/developers/developer-patterns/navigating-merklelogs/) (note: this material is not released yet)
 
 # Verifying a single event
 
@@ -147,18 +98,20 @@ The same command accepts the result of a DataTrails list events call, e.g.
     curl -sL $DATATRAILS_URL/archivist/v2/$PUBLIC_ASSET_ID/events | \
       veracity --data-url $DATATRAILS_URL/verifiabledata --tenant=$PUBLIC_TENANT_ID verify-included 
 
+# Read selected node from log
+
+An example of reading node associated with specific event, it's possible to visit merkle log entry page https://app.datatrails.ai/merklelogentry/87dd2e5a-42b4-49a5-8693-97f40a5af7f8/999773ed-cc92-4d9c-863f-b418418705ea?public=true for event https://app.datatrails.ai/archivist/publicassets/87dd2e5a-42b4-49a5-8693-97f40a5af7f8/events/999773ed-cc92-4d9c-863f-b418418705ea
+
+On the Merkle log entry page we can see `MMR Index` field with value `916` which can be used with `node` command to retrieve the leaf directly from merklelog by using following command
+
+    PUBLIC_TENANT_ID=tenant/6ea5cd00-c711-3649-6914-7b125928bbb4
+    DATATRAILS_URL=https://app.datatrails.ai
+ 
+    veracity --data-url $DATATRAILS_URL/verifiabledata --tenant=$PUBLIC_TENANT_ID node --mmrindex 916
+
+Above command will output `c3323019fd1d325ac068d203c62007b504c5fa762446a9fe5d88e392ec96914b` which will match the value from the merkle log enty page.
+
 # General use commands
 
 * `node` - read a merklelog node
-* `nodescan` - scan a log for a particular node value
-* `diag` - print diagnostics about a massif, identified by massif index or by an mmr index
 * `verify-included` - verify the inclusion of an event, or list of events, in the tenant's merkle log
-* `event-log-info` - print diagnostics about an events entry in the log (currently only supports events on protected assets)
-* `massifs` - Generate pre-calculated tables for navigating massif raw storage with maximum convenience
-
-# Developer commands
-
-The following sub commands are used in development or by contributors. Or
-currently require an authenticated connection
-
-* tail, watch
