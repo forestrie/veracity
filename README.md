@@ -55,8 +55,8 @@ veracity --help
 
 If `veracity --help` fails, check the following:
 
-confirm `` includes `.local/bin`.
-Either add to the path, or place in an alternate location
+Confirm `$PATH` includes `.local/bin`.
+Either add  the location to `$PATH`, or place veracity in an alternate location within an existing `$PATH`.
 
 ```console
 # Check veracity exists in your $PATH
@@ -161,7 +161,8 @@ One of the many scenarios DataTrails prevents is tampering if and when informati
 
 ## Verify All Events
 
-The `veracity verify-included` command accepts the result of a DataTrails list events call
+The `veracity verify-included` command accepts the result of a DataTrails list events call.
+This verifies the inclusion of each event in the returned list.
 
 1. Pipe the `events` to veracity:
 
