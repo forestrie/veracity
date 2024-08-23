@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/datatrails/go-datatrails-logverification/logverification"
+	"github.com/datatrails/go-datatrails-merklelog/massifs"
 	"github.com/datatrails/go-datatrails-merklelog/mmr"
 	"github.com/urfave/cli/v2"
 )
@@ -30,13 +31,12 @@ func proofPath(proof [][]byte) string {
 }
 
 func verifyEvent(event *logverification.VerifiableEvent, massifHeight uint8, massifReader MassifReader, forTenant string) ([][]byte, error) {
-
 	// Get the mmrIndex from the request and then compute the massif
 	// it implies based on the massifHeight command line option.
 	mmrIndex := event.MerkleLog.Commit.Index
 
 	tenantIdentity := forTenant
-	massifIndex := mmr.LeafIndex(mmrIndex+1) / mmr.HeightSize(uint64(massifHeight))
+	massifIndex := massifs.MassifIndexFromMMRIndex(massifHeight, mmrIndex)
 	if tenantIdentity == "" {
 		// The tenant identity on the event is the original tenant
 		// that created the event. For public assets and shared
@@ -73,7 +73,6 @@ func verifyEvent(event *logverification.VerifiableEvent, massifHeight uint8, mas
 	verified := mmr.VerifyInclusion(mmrSize, hasher, event.LeafHash, mmrIndex, proof, root)
 	if verified {
 		return proof, nil
-
 	}
 
 	return nil, fmt.Errorf("event not included")
