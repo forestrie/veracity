@@ -45,16 +45,6 @@ type WatchConfig struct {
 	ReaderURL    string
 }
 
-type TenantActivity struct {
-	Massif       int    `json:"massifindex"`
-	Tenant       string `json:"tenant"`
-	IDCommitted  string `json:"idcommitted"`
-	IDConfirmed  string `json:"idconfirmed"`
-	LastModified string `json:"lastmodified"`
-	MassifURL    string `json:"massif"`
-	SealURL      string `json:"seal"`
-}
-
 // watchReporter abstracts the output interface for WatchForChanges to facilitate unit testing.
 type watchReporter interface {
 	Logf(message string, args ...any)
@@ -119,16 +109,14 @@ func NewLogWatcherCmd() *cli.Command {
 			cmd := &CmdCtx{}
 			ctx := context.Background()
 
-			if err = cfgMassifReader(cmd, cCtx); err != nil {
-				return err
-			}
-
 			cfg, err := NewWatchConfig(cCtx, cmd)
 			if err != nil {
 				return err
 			}
 
-			reader, err := cfgReader(cmd, cCtx, false)
+			forceProdUrl := cCtx.String("data-url") == ""
+
+			reader, err := cfgReader(cmd, cCtx, forceProdUrl)
 			if err != nil {
 				return err
 			}
