@@ -16,7 +16,8 @@ before:
     - go generate ./...
 
 builds:
-  - env:
+  - id: veracity-linux
+    env:
       - CGO_ENABLED=0
     main: ./cmd/veracity/
     goos:
@@ -26,6 +27,18 @@ builds:
       - darwin
   - ldflags:
       - "-X veracity.version={{.Version}} -X veracity.commit={{.Commit}} -X veracity.buildDate={{.Date}}"
+  - id: veracity-linux
+    env:
+      - CGO_ENABLED=0
+    main: ./cmd/veracity/
+    goos:
+      # Its straightforward to support Windows but we removed it due to setup cost of automatically 
+      # testing it.
+      - linux
+      - darwin
+  - ldflags:
+      - "-X veracity.version={{.Version}} -X veracity.commit={{.Commit}} -X veracity.buildDate={{.Date}}"
+
 
 archives:
   - format: tar.gz
