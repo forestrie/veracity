@@ -23,7 +23,7 @@ builds:
       - darwin
     main: ./cmd/veracity/
     ldflags:
-      - "-s -w -X veracity.version={{.Version}} -X veracity.commit={{.Commit}} -X veracity.buildDate={{.Date}}"
+      - "-s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.buildDate={{.Date}}"
 
 archives:
   - format: tar.gz
