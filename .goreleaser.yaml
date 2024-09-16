@@ -21,6 +21,9 @@ builds:
     goos:
       - linux
       - darwin
+    main: ./cmd/veracity/
+    ldflags:
+      - "-X veracity.version={{.Version}} -X veracity.commit={{.Commit}} -X veracity.buildDate={{.Date}}"
 
 archives:
   - format: tar.gz
