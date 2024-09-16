@@ -18,7 +18,8 @@ before:
 builds:
   # Its straightforward to support Windows but we removed it due to setup cost of automatically 
   # testing it.
-  - env:
+  - id: rumplestiltskin
+    env:
       - CGO_ENABLED=0
     main: ./cmd/veracity/
     goos:
