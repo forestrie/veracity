@@ -18,8 +18,7 @@ before:
 builds:
   # Its straightforward to support Windows but we removed it due to setup cost of automatically 
   # testing it.
-  - id: veracity-linux
-    env:
+  - env:
       - CGO_ENABLED=0
     main: ./cmd/veracity/
     goos:
@@ -28,16 +27,16 @@ builds:
       - amd64
   - ldflags:
       - "-X veracity.version={{.Version}} -X veracity.commit={{.Commit}} -X veracity.buildDate={{.Date}}"
-  - id: veracity-darwin
-    env:
-      - CGO_ENABLED=0
-    main: ./cmd/veracity/
-    goos:
-      - darwin
-    goarch:
-      - arm64
-  - ldflags:
-      - "-X veracity.version={{.Version}} -X veracity.commit={{.Commit}} -X veracity.buildDate={{.Date}}"
+  #- id: veracity-darwin
+  #  env:
+  #    - CGO_ENABLED=0
+  #  main: ./cmd/veracity/
+  #  goos:
+  #    - darwin
+  #  goarch:
+  #    - arm64
+  #- ldflags:
+  #    - "-X veracity.version={{.Version}} -X veracity.commit={{.Commit}} -X veracity.buildDate={{.Date}}"
 
 archives:
   - format: tar.gz
