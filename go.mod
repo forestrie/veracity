@@ -6,18 +6,17 @@ require (
 	github.com/datatrails/go-datatrails-common v0.16.1
 	github.com/datatrails/go-datatrails-common-api-gen v0.4.6
 	github.com/datatrails/go-datatrails-logverification v0.1.7
-	github.com/datatrails/go-datatrails-merklelog/massifs v0.1.0
+	github.com/datatrails/go-datatrails-merklelog/massifs v0.1.1
 	github.com/datatrails/go-datatrails-merklelog/mmr v0.0.2
 	github.com/datatrails/go-datatrails-merklelog/mmrtesting v0.1.0
 	github.com/datatrails/go-datatrails-simplehash v0.0.5
 	github.com/gosuri/uiprogress v0.0.1
 	github.com/urfave/cli/v2 v2.27.1
 	github.com/zeebo/bencode v1.0.0
+	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
 )
 
-// replace (
-// 	github.com/datatrails/go-datatrails-merklelog/massifs => ../go-datatrails-merklelog/massifs
-// )
+// replace github.com/datatrails/go-datatrails-merklelog/massifs => ../go-datatrails-merklelog/massifs
 
 require (
 	github.com/envoyproxy/protoc-gen-validate v1.0.4 // indirect
