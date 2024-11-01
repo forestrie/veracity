@@ -503,11 +503,30 @@ func (v *VerifiedReplica) replicateVerifiedContext(
 
 	// if the remote and local are the same, we are done, provided the roots still match
 	if len(local.Data) == len(remote.Data) {
-		if !bytes.Equal(local.ConsistentRoots, remote.ConsistentRoots) {
+		// note: the length equal check is elevated so we only write to local
+		// disc if there are changes.  this duplicates a check in
+		// verifiedStateEqual in the interest of avoiding accidents due to
+		// future refactorings.
+		if !verifiedStateEqual(local, remote) {
 			return fmt.Errorf("%w: %s, massif=%d", ErrRemoteLogInconsistentRootState, tenantIdentity, massifIndex)
 		}
 		return nil
 	}
 
 	return v.localReader.ReplaceVerifiedContext(remote, v.writeOpener)
+}
+
+func verifiedStateEqual(a *massifs.VerifiedContext, b *massifs.VerifiedContext) bool {
+	if len(a.Data) != len(b.Data) {
+		return false
+	}
+	if len(a.ConsistentRoots) != len(b.ConsistentRoots) {
+		return false
+	}
+	for i := 0; i < len(a.ConsistentRoots); i++ {
+		if !bytes.Equal(a.ConsistentRoots[i], b.ConsistentRoots[i]) {
+			return false
+		}
+	}
+	return true
 }
