@@ -3,6 +3,7 @@ package veracity
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"github.com/datatrails/go-datatrails-common/cbor"
 	"github.com/datatrails/go-datatrails-common/logger"
 	"github.com/datatrails/go-datatrails-merklelog/massifs"
+	"github.com/datatrails/go-datatrails-merklelog/mmr"
 	"github.com/gosuri/uiprogress"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/exp/rand"
@@ -45,6 +47,10 @@ func NewReplicateLogsCmd() *cli.Command {
 		Usage:   `verifies the remote log and replicates it locally, ensuring the remote changes are consistent with the trusted local replica.`,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{Name: skipUncommittedFlagName, Value: false},
+			&cli.BoolFlag{
+				Name: "enable-v1seals", Value: false,
+				Usage: "Set to enable pre-release suport for the new V1 seal format. Once the new format is in production, this flag will be removed.",
+			},
 			&cli.IntFlag{
 				Name: "massif", Aliases: []string{"m"},
 			},
@@ -372,7 +378,43 @@ func (v *VerifiedReplica) ReplicateVerifiedUpdates(
 		if local == nil {
 			return opts
 		}
+
 		return append(opts, massifs.WithTrustedBaseState(local.MMRState))
+	}
+
+	// on demand promotion of a v0 state to a v1 state, for compatibility with the consistency check.
+	trustedBaseState := func(local *massifs.VerifiedContext) (massifs.MMRState, error) {
+
+		if local.MMRState.Version > int(massifs.MMRStateVersion0) {
+			// this will just work, until v1 seals reach production no customer can encounter this.
+			return local.MMRState, nil
+		}
+
+		if !v.cCtx.Bool("enable-v1seals") {
+			// The user has not explictly enabled the new seal format, so we return the legacy state unchanged.
+			// THis will "just work" for production. Use against a pre-release endpoint will fail verification.
+			return local.MMRState, nil
+		}
+
+		// Ok, production case. We need to promote the legacy base state to a V1
+		// state for the consistency check.  This is a one way operation, and
+		// the legacy seal root is discarded.  Once the seal for the open massif
+		// is upgraded, this case will never be encountered again for that
+		// tenant.
+
+		peaks, err := mmr.PeakHashes(local, local.MMRState.MMRSize-1)
+		if err != nil {
+			return massifs.MMRState{}, err
+		}
+		root := mmr.HashPeaksRHS(sha256.New(), peaks)
+		if !bytes.Equal(root, local.MMRState.LegacySealRoot) {
+			return massifs.MMRState{}, fmt.Errorf("legacy seal root does not match the bagged peaks")
+		}
+		state := local.MMRState
+		state.Version = int(massifs.MMRStateVersion1)
+		state.LegacySealRoot = nil
+		state.Peaks = peaks
+		return state, nil
 	}
 
 	if err := v.localReader.EnsureReplicaDirs(tenantIdentity); err != nil {
@@ -431,6 +473,19 @@ func (v *VerifiedReplica) ReplicateVerifiedUpdates(
 	}
 
 	for i := startMassif; i <= endMassif; i++ {
+
+		if local != nil {
+			// Promote the trusted base state to a V1 state if it is a V0 state.
+			// All currently incomplete massifs in remote replicas will have their
+			// last seal upgraded as a result.  Historic seals for previously
+			// completed massifs will remain as V0 seals.  Atempting to replicate a
+			// V0 state will fail with a suitable error. That just implies the
+			// veracity tool has been run against a legacy endpoint.
+			local.MMRState, err = trustedBaseState(local)
+			if err != nil {
+				return err
+			}
+		}
 
 		// On the first iteration local is *either* the predecessor to
 		// startMassif or it is the, as yet, incomplete local replica of it.
@@ -517,16 +572,54 @@ func (v *VerifiedReplica) replicateVerifiedContext(
 }
 
 func verifiedStateEqual(a *massifs.VerifiedContext, b *massifs.VerifiedContext) bool {
+
+	var err error
+
+	// There is no difference in the log format between the two versions currently supported.
 	if len(a.Data) != len(b.Data) {
 		return false
 	}
-	if len(a.ConsistentRoots) != len(b.ConsistentRoots) {
+	fromRoots := a.ConsistentRoots
+	toRoots := b.ConsistentRoots
+	// If either state is a V0 state, compare the legacy seal roots
+	if a.MMRState.Version == int(massifs.MMRStateVersion0) || b.MMRState.Version == int(massifs.MMRStateVersion0) {
+		rootA := peakBaggedRoot(a.MMRState)
+		rootB := peakBaggedRoot(b.MMRState)
+		if !bytes.Equal(rootA, rootB) {
+			return false
+		}
+		if a.MMRState.Version == int(massifs.MMRStateVersion0) {
+			fromRoots, err = mmr.PeakHashes(a, a.MMRState.MMRSize-1)
+			if err != nil {
+				return false
+			}
+		}
+		if b.MMRState.Version == int(massifs.MMRStateVersion0) {
+			toRoots, err = mmr.PeakHashes(b, b.MMRState.MMRSize-1)
+			if err != nil {
+				return false
+			}
+		}
+
+	}
+
+	// If both states are V1 states, compare the peaks
+	if len(fromRoots) != len(toRoots) {
 		return false
 	}
-	for i := 0; i < len(a.ConsistentRoots); i++ {
-		if !bytes.Equal(a.ConsistentRoots[i], b.ConsistentRoots[i]) {
+	for i := 0; i < len(fromRoots); i++ {
+		if !bytes.Equal(fromRoots[i], toRoots[i]) {
 			return false
 		}
 	}
 	return true
+}
+
+// peakBaggedRoot is used to obtain an MMRState V0 bagged root from a V1 accumulator peak list.
+// If a v0 state is provided, the root is returned as is.
+func peakBaggedRoot(state massifs.MMRState) []byte {
+	if state.Version < int(massifs.MMRStateVersion1) {
+		return state.LegacySealRoot
+	}
+	return mmr.HashPeaksRHS(sha256.New(), state.Peaks)
 }
