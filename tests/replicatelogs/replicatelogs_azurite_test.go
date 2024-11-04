@@ -4,6 +4,7 @@ package verifyconsistency
 
 import (
 	"context"
+	"crypto/elliptic"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,6 +17,146 @@ import (
 	"github.com/datatrails/veracity"
 	"github.com/stretchr/testify/require"
 )
+
+// TestV0ToV1ReplicationTransition tests that v0 seal replica can be continued with v1 seals
+// In this tests the log starts with v0 seals, is replicated, and the continues with v1 seals.
+// This covers the production case where there are previously replicated logs.
+func (s *ReplicateLogsCmdSuite) TestV0ToV1ReplicationTransition() {
+
+	logger.New("TestV0ToV1ReplicationTransition")
+	defer logger.OnExit()
+
+	tc := massifs.NewLocalMassifReaderTestContext(
+		s.T(), logger.Sugar, "TestV0ToV1ReplicationTransition")
+
+	h8MassifLeaves := mmr.HeightIndexLeafCount(uint64(8 - 1)) // = ((2 << massifHeight) - 1 + 1) >> 1
+
+	tests := []struct {
+		name                 string
+		massifHeight         uint8
+		legacyCount          uint64
+		lastLeagacyLeafCount uint64
+		// if zero, the last legacy massif will be completed. If the last legacy is full and v1Count is zero the test is invalid
+		v1Count         uint64
+		lastV1LeafCount uint64
+	}{
+		// make sure we cover the obvious edge cases
+		{name: "complete first massif with v0 promoted to v1", massifHeight: 8, legacyCount: 0, lastLeagacyLeafCount: h8MassifLeaves - 3, v1Count: 0, lastV1LeafCount: 3},
+	}
+	key := massifs.TestGenerateECKey(s.T(), elliptic.P256())
+
+	for _, tt := range tests {
+
+		s.Run(tt.name, func() {
+
+			// Populate the log with content under legacy seals
+
+			require.True(s.T(), tt.legacyCount > 0 || tt.lastLeagacyLeafCount > 0, uint32(0), "invalid test")
+			require.True(s.T(), tt.v1Count > 0 || tt.lastV1LeafCount > 0, uint32(0), "invalid test")
+			replicaDir := s.T().TempDir()
+			tenantId0 := tc.G.NewTenantIdentity()
+			// leagacyLeafCount = massifLeaves*tt.legacyCount + tt.lastLeagacyLeafCount
+
+			// note: CreateLog both creates the massifs *and* populates them
+			lastMassif := uint32(tt.legacyCount)
+			if lastMassif > 0 {
+				lastMassif--
+			}
+
+			// If we skip CreateLog below, we need to delete the blobs
+			tc.AzuriteContext.DeleteBlobsByPrefix(massifs.TenantMassifPrefix(tenantId0))
+
+			if lastMassif > 0 {
+				tc.CreateLog(
+					tenantId0, tt.massifHeight, lastMassif,
+					massifs.TestWithSealKey(&key), massifs.TestWithV0Seals(),
+				)
+			}
+			if tt.lastLeagacyLeafCount > 0 {
+				tc.AddLeavesToLog(
+					tenantId0, tt.massifHeight, int(tt.lastLeagacyLeafCount),
+					massifs.TestWithSealKey(&key), massifs.TestWithV0Seals(),
+				)
+			}
+
+			// Replicate the log
+			// note: VERACITY_IKWID is set in main, we need it to enable --envauth so we force it here
+			app := veracity.NewApp("tests", true)
+			veracity.AddCommands(app, true)
+
+			err := app.Run([]string{
+				"veracity",
+				"--envauth", // uses the emulator
+				"--container", tc.TestConfig.Container,
+				"--data-url", s.Env.AzuriteVerifiableDataURL,
+				"--tenant", tenantId0,
+				"--height", fmt.Sprintf("%d", tt.massifHeight),
+				"replicate-logs",
+				// "--ancestors", fmt.Sprintf("%d", tt.ancestors),
+				"--replicadir", replicaDir,
+				"--massif", fmt.Sprintf("%d", lastMassif),
+			})
+			s.NoError(err)
+
+			// Add v1 sealed content
+			lastMassif = uint32(tt.v1Count)
+			if lastMassif > 0 {
+				lastMassif--
+			}
+
+			// Add v1 sealed content
+			if lastMassif > 0 {
+				massifLeaves := mmr.HeightIndexLeafCount(uint64(tt.massifHeight - 1)) // = ((2 << massifHeight) - 1 + 1) >> 1
+				// CreateLog always deleted blobs, so we can only use AddLeavesToLog here
+				for i := uint64(0); i < tt.v1Count; i++ {
+					tc.AddLeavesToLog(
+						tenantId0, tt.massifHeight, int(massifLeaves),
+						massifs.TestWithSealKey(&key), /*, massifs.TestWithV0Seals() V1 seals*/
+					)
+
+				}
+			}
+			if tt.lastLeagacyLeafCount > 0 {
+				tc.AddLeavesToLog(
+					tenantId0, tt.massifHeight, int(tt.lastV1LeafCount),
+					massifs.TestWithSealKey(&key), /*, massifs.TestWithV0Seals() V1 seals*/
+				)
+			}
+
+			// Replicate the v1 content
+			err = app.Run([]string{
+				"veracity",
+				"--envauth", // uses the emulator
+				"--container", tc.TestConfig.Container,
+				"--data-url", s.Env.AzuriteVerifiableDataURL,
+				"--tenant", tenantId0,
+				"--height", fmt.Sprintf("%d", tt.massifHeight),
+				"replicate-logs",
+				"--replicadir", replicaDir,
+				"--massif", fmt.Sprintf("%d", lastMassif),
+			})
+			s.Error(err) // not explicitly enabling seals, replication should fail
+
+			err = app.Run([]string{
+				"veracity",
+				"--envauth", // uses the emulator
+				"--container", tc.TestConfig.Container,
+				"--data-url", s.Env.AzuriteVerifiableDataURL,
+				"--tenant", tenantId0,
+				"--height", fmt.Sprintf("%d", tt.massifHeight),
+				"replicate-logs",
+
+				// enable the v1 seals and the replication should succeed
+				"--enable-v1seals",
+				"--replicadir", replicaDir,
+				"--massif", fmt.Sprintf("%d", lastMassif),
+			})
+
+			s.NoError(err)
+		})
+	}
+
+}
 
 // TestReplicatingMassifLogsForOneTenant test that by default af full replica is made
 func (s *ReplicateLogsCmdSuite) TestReplicatingMassifLogsForOneTenant() {
@@ -76,10 +217,10 @@ func (s *ReplicateLogsCmdSuite) TestReplicatingMassifLogsForOneTenant() {
 	}
 }
 
-// TestSingleAncestorMassifsForOneTenant tests that the --ancestors option
+// TestAncestorMassifsForOneTenant tests that the --ancestors option
 // limits the number of historical massifs that are replicated Note that
 // --ancestors=0 still requires consistency against local replica of the remote
-func (s *ReplicateLogsCmdSuite) TestSingleAncestorMassifLogsForOneTenant() {
+func (s *ReplicateLogsCmdSuite) TestAncestorMassifLogsForOneTenant() {
 
 	logger.New("Test4AzuriteMassifsForOneTenant")
 	defer logger.OnExit()
@@ -166,55 +307,6 @@ func (s *ReplicateLogsCmdSuite) TestSingleAncestorMassifLogsForOneTenant() {
 				s.FileExistsf(expectSealFile, "the replicated seal should exist")
 			}
 		})
-	}
-}
-
-func (s *ReplicateLogsCmdSuite) TestSingleAncestorMassifsForOneTenantx() {
-
-	logger.New("Test4AzuriteSingleAncestorMassifsForOneTenant")
-	defer logger.OnExit()
-
-	tc := massifs.NewLocalMassifReaderTestContext(
-		s.T(), logger.Sugar, "Test4AzuriteSingleAncestorMassifsForOneTenant")
-
-	massifCount := uint32(4)
-	massifHeight := uint8(8)
-
-	tenantId0 := tc.G.NewTenantIdentity()
-	// note: CreateLog both creates the massifs *and* populates them
-	tc.CreateLog(tenantId0, massifHeight, massifCount)
-
-	replicaDir := s.T().TempDir()
-
-	// note: VERACITY_IKWID is set in main, we need it to enable --envauth so we force it here
-	app := veracity.NewApp("tests", true)
-	veracity.AddCommands(app, true)
-
-	err := app.Run([]string{
-		"veracity",
-		"--envauth", // uses the emulator
-		"--container", tc.TestConfig.Container,
-		"--data-url", s.Env.AzuriteVerifiableDataURL,
-		"--tenant", tenantId0,
-		"--height", fmt.Sprintf("%d", massifHeight),
-		"replicate-logs",
-		"--ancestors", "1",
-		"--replicadir", replicaDir,
-		"--massif", fmt.Sprintf("%d", massifCount-1),
-	})
-	s.NoError(err)
-
-	// check the 0'th massifs and seals were _not_ replicated
-	expectMassifFile := filepath.Join(replicaDir, massifs.ReplicaRelativeMassifPath(tenantId0, 0))
-	s.NoFileExistsf(expectMassifFile, "the replicated massif should NOT exist")
-	expectSealFile := filepath.Join(replicaDir, massifs.ReplicaRelativeSealPath(tenantId0, 0))
-	s.NoFileExistsf(expectSealFile, "the replicated seal should NOT exist")
-
-	for i := uint32(2); i < massifCount; i++ {
-		expectMassifFile := filepath.Join(replicaDir, massifs.ReplicaRelativeMassifPath(tenantId0, i))
-		s.FileExistsf(expectMassifFile, "the replicated massif should exist")
-		expectSealFile := filepath.Join(replicaDir, massifs.ReplicaRelativeSealPath(tenantId0, i))
-		s.FileExistsf(expectSealFile, "the replicated seal should exist")
 	}
 }
 
