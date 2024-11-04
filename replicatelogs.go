@@ -396,11 +396,12 @@ func (v *VerifiedReplica) ReplicateVerifiedUpdates(
 			return local.MMRState, nil
 		}
 
-		// Ok, production case. We need to promote the legacy base state to a V1
-		// state for the consistency check.  This is a one way operation, and
-		// the legacy seal root is discarded.  Once the seal for the open massif
-		// is upgraded, this case will never be encountered again for that
-		// tenant.
+		// At this point we have a local seal in v0 format and we expect the
+		// remote seal to be in v1 format (post v1 seal release for avid + forestrie).
+		// We need to promote the legacy base state to a V1 state for the
+		// consistency check.  This is a one way operation, and the legacy seal
+		// root is discarded.  Once the seal for the open massif is upgraded,
+		// this case will never be encountered again for that tenant.
 
 		peaks, err := mmr.PeakHashes(local, local.MMRState.MMRSize-1)
 		if err != nil {
