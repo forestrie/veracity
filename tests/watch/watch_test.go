@@ -6,6 +6,50 @@ import (
 	"github.com/datatrails/veracity"
 )
 
+func (s *WatchCmdSuite) TestErrorForNegativeHorizon() {
+
+	app := veracity.NewApp("version", false)
+	veracity.AddCommands(app, false)
+
+	err := app.Run([]string{
+		"veracity",
+		"--data-url", s.Env.VerifiableDataURL,
+		"watch",
+		"--horizon", "-1h",
+	})
+	s.ErrorContains(err, "negative horizon")
+}
+
+func (s *WatchCmdSuite) TestErrorGuidanceForVeryLargeHorizon() {
+
+	app := veracity.NewApp("version", false)
+	veracity.AddCommands(app, false)
+
+	err := app.Run([]string{
+		"veracity",
+		"--data-url", s.Env.VerifiableDataURL,
+		"watch",
+		"--horizon", "1000000000h",
+	})
+	s.ErrorContains(err, "--horizon=max")
+	s.ErrorContains(err, "--latest")
+}
+
+func (s *WatchCmdSuite) TestErrorGuidanceForLargeButParsableHorizon() {
+
+	app := veracity.NewApp("version", false)
+	veracity.AddCommands(app, false)
+
+	err := app.Run([]string{
+		"veracity",
+		"--data-url", s.Env.VerifiableDataURL,
+		"watch",
+		"--horizon", "1000000h", // over flows the id timestamp epoch
+	})
+	s.ErrorContains(err, "--horizon=max")
+	s.ErrorContains(err, "--latest")
+}
+
 func (s *WatchCmdSuite) TestNoErrorOrNoChanges() {
 
 	app := veracity.NewApp("version", false)
@@ -30,7 +74,7 @@ func (s *WatchCmdSuite) TestNoChangesForFictitiousTenant() {
 		"veracity",
 		"--data-url", s.Env.VerifiableDataURL,
 		"--tenant", s.Env.UnknownTenantId,
-		"watch",
+		"watch", "--latest",
 	})
 	assert.Equal(err, veracity.ErrNoChanges)
 }

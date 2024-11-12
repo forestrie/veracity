@@ -68,6 +68,61 @@ func TestNewWatchConfig(t *testing.T) {
 		check     checkWatchConfig
 		errPrefix string
 	}{
+
+		{
+			name: "max horizon alias",
+			args: args{
+				cCtx: &mockContext{
+					horizon: "max",
+				},
+				cmd: new(CmdCtx),
+			},
+		},
+
+		{
+			name: "latest flag for casual replicators",
+			args: args{
+				cCtx: &mockContext{
+					latest: true,
+				},
+				cmd: new(CmdCtx),
+			},
+		},
+
+		{
+			name: "latest mutualy exclusive with horizon",
+			args: args{
+				cCtx: &mockContext{
+					latest:  true,
+					horizon: "1h",
+				},
+				cmd: new(CmdCtx),
+			},
+			errPrefix: "the latest flag is mutualy exclusive",
+		},
+
+		{
+			name: "interval too small",
+			args: args{
+				cCtx: &mockContext{
+					horizon: "1h",
+					// just under a second
+					interval: time.Millisecond * 999,
+				},
+				cmd: new(CmdCtx),
+			},
+			errPrefix: "polling more than once per second is not",
+		},
+
+		{
+			name: "horizon or since options are required",
+			args: args{
+				cCtx: &mockContext{},
+				cmd:  new(CmdCtx),
+			},
+			errPrefix: "provide horizon on its own or either of the since",
+		},
+
 		{
 			name: "poll count is at least one",
 			args: args{
@@ -109,18 +164,6 @@ func TestNewWatchConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "interval too small",
-			args: args{
-				cCtx: &mockContext{
-					horizon: time.Hour,
-					// just under a second
-					interval: time.Millisecond * 999,
-				},
-				cmd: new(CmdCtx),
-			},
-			errPrefix: "polling more than once per second is not",
-		},
-		{
 			name: "bad hex string for idtimestamp errors",
 			args: args{
 				cCtx: &mockContext{
@@ -129,14 +172,6 @@ func TestNewWatchConfig(t *testing.T) {
 				cmd: new(CmdCtx),
 			},
 			errPrefix: "encoding/hex: invalid byte",
-		},
-		{
-			name: "horizon or since options are required",
-			args: args{
-				cCtx: &mockContext{},
-				cmd:  new(CmdCtx),
-			},
-			errPrefix: "provide horizon on its own or either of the since",
 		},
 	}
 	for _, tt := range tests {
@@ -498,12 +533,36 @@ func (r *mockReporter) Outf(message string, args ...any) {
 
 type mockContext struct {
 	since    *time.Time
+	latest   bool
 	mode     string
 	idsince  string
-	horizon  time.Duration
+	horizon  string
 	interval time.Duration
 	count    int
 	tenant   string
+}
+
+func (c mockContext) IsSet(n string) bool {
+	switch n {
+	case "since":
+		return c.since != nil
+	case "latest":
+		return c.latest == true
+	case "mode":
+		return c.mode != ""
+	case "idsince":
+		return c.idsince != ""
+	case "horizon":
+		return c.horizon != ""
+	case "interval":
+		return c.interval != 0
+	case "count":
+		return c.count != 0
+	case "tenant":
+		return c.tenant != ""
+	default:
+		return false
+	}
 }
 
 func (c mockContext) String(n string) string {
@@ -514,8 +573,19 @@ func (c mockContext) String(n string) string {
 		return c.idsince
 	case "tenant":
 		return c.tenant
+	case "horizon":
+		return c.horizon
 	default:
 		return ""
+	}
+}
+
+func (c mockContext) Bool(n string) bool {
+	switch n {
+	case "latest":
+		return c.latest
+	default:
+		return false
 	}
 }
 
@@ -530,8 +600,6 @@ func (c mockContext) Int(n string) int {
 
 func (c mockContext) Duration(n string) time.Duration {
 	switch n {
-	case "horizon":
-		return c.horizon
 	case "interval":
 		return c.interval
 	default:
