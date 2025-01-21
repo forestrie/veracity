@@ -6,12 +6,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/datatrails/go-datatrails-merklelog/massifs"
 	"github.com/datatrails/go-datatrails-merklelog/massifs/snowflakeid"
 	"github.com/datatrails/go-datatrails-merklelog/mmr"
 	"github.com/datatrails/go-datatrails-simplehash/simplehash"
+	veracityapp "github.com/datatrails/veracity/app"
 	"github.com/urfave/cli/v2"
 )
 
@@ -29,7 +31,15 @@ func NewEventDiagCmd() *cli.Command {
 			},
 		},
 		Action: func(cCtx *cli.Context) error {
-			decodedEvents, err := stdinToDecodedEvents()
+
+			tenantIdentity := cCtx.String("tenant")
+
+			appData, err := veracityapp.ReadAppData(cCtx.Args().Len() == 0, cCtx.Args().Get(0))
+			if err != nil {
+				return err
+			}
+
+			appEntries, err := veracityapp.AppDataToVerifiableLogEntries(appData, tenantIdentity)
 			if err != nil {
 				return err
 			}
@@ -47,15 +57,15 @@ func NewEventDiagCmd() *cli.Command {
 				return false
 			}
 
-			for _, decodedEvent := range decodedEvents {
+			for _, appEntry := range appEntries {
 
-				if decodedEvent.MerkleLog == nil || decodedEvent.MerkleLog.Commit == nil {
+				if appEntry.MMRIndex() == 0 {
 					continue
 				}
 
 				// Get the mmrIndex from the request and then compute the massif
 				// it implies based on the massifHeight command line option.
-				mmrIndex := decodedEvent.MerkleLog.Commit.Index
+				mmrIndex := appEntry.MMRIndex()
 				massifIndex := massifs.MassifIndexFromMMRIndex(cmd.massifHeight, mmrIndex)
 				tenantIdentity := cCtx.String("tenant")
 				if tenantIdentity == "" {
@@ -64,7 +74,10 @@ func NewEventDiagCmd() *cli.Command {
 					// assets, this is true regardless of which tenancy the
 					// record is fetched from.  Those same events will appear in
 					// the logs of all tenants they were shared with.
-					tenantIdentity = decodedEvent.V3Event.TenantIdentity
+					tenantIdentity, err = appEntry.LogTenant()
+					if err != nil {
+						return err
+					}
 				}
 				// read the massif blob
 				cmd.massif, err = cmd.massifReader.GetMassif(context.Background(), tenantIdentity, massifIndex)
@@ -73,8 +86,16 @@ func NewEventDiagCmd() *cli.Command {
 				}
 
 				// Get the human time from the idtimestamp committed on the event.
+				idTimestamp, err := appEntry.IDTimestamp(&cmd.massif)
+				if err != nil {
+					return err
+				}
 
-				eventIDTimestamp, _, err := massifs.SplitIDTimestampHex(decodedEvent.MerkleLog.Commit.Idtimestamp)
+				idTimestampWithEpoch := make([]byte, len(idTimestamp)+1)
+				idTimestampWithEpoch[0] = byte(0) // 0 epoch
+				copy(idTimestampWithEpoch[1:], idTimestamp)
+
+				eventIDTimestamp, _, err := massifs.SplitIDTimestampBytes(idTimestampWithEpoch)
 				if err != nil {
 					return err
 				}
@@ -85,7 +106,7 @@ func NewEventDiagCmd() *cli.Command {
 
 				leafIndex := mmr.LeafIndex(mmrIndex)
 				// Note that the banner info is all from the event response
-				fmt.Printf("%d %s %s\n", leafIndex, time.UnixMilli(eventIDTimestampMS).Format(time.RFC3339Nano), decodedEvent.V3Event.Identity)
+				fmt.Printf("%d %s %s\n", leafIndex, time.UnixMilli(eventIDTimestampMS).Format(time.RFC3339Nano), appEntry.AppID())
 
 				leafIndexMassif, err := cmd.massif.GetMassifLeafIndex(leafIndex)
 				if err != nil {
@@ -100,6 +121,8 @@ func NewEventDiagCmd() *cli.Command {
 					return err
 				}
 
+				logTrieKey := massifs.GetTrieKey(cmd.massif.Data, cmd.massif.IndexStart(), leafIndexMassif)
+
 				logTrieIDTimestampBytes := logTrieEntry[massifs.TrieEntryIdTimestampStart:massifs.TrieEntryIdTimestampEnd]
 				logTrieIDTimestamp := binary.BigEndian.Uint64(logTrieIDTimestampBytes)
 				unixMS, err := snowflakeid.IDUnixMilli(logTrieIDTimestamp, uint8(cmd.massif.Start.CommitmentEpoch))
@@ -108,31 +131,37 @@ func NewEventDiagCmd() *cli.Command {
 				}
 				idTime := time.UnixMilli(unixMS)
 
+				// TODO: log version 1 uses the uuid bytes of the log tenant
+				// so we need to handle that here as well as log version 0.
 				trieKey := massifs.NewTrieKey(
 					massifs.KeyTypeApplicationContent,
 					[]byte(tenantIdentity),
-					[]byte(decodedEvent.V3Event.Identity))
+					[]byte(strings.TrimPrefix(appEntry.AppID(), "public")))
 				if len(trieKey) != massifs.TrieKeyBytes {
 					return massifs.ErrIndexEntryBadSize
 				}
 				cmpPrint(
 					" |%x trie-key\n",
-					" |%x != log-trie-key %x\n", trieKey[:32], logTrieEntry[:32])
+					" |%x != log-trie-key %x\n", trieKey[:32], logTrieKey[:32])
 				fmt.Printf(" |%x %s log-idtimestamp\n", logTrieIDTimestampBytes, idTime.Format(time.DateTime))
 				cmpPrint(
 					" |%x idtimestamp\n",
 					" |%x != log-idtimestamp %x\n", eventIDTimestamp, logTrieIDTimestamp)
 
 				// Compute the event data hash, independent of domain and idtimestamp
+				v3Event, err := simplehash.V3FromEventJSON(appEntry.SerializedBytes()) // NOTE for assetsv2 the serialized bytes is actually the event json API response
+				if err != nil {
+					return err
+				}
 
 				eventHasher := sha256.New()
-				if err = simplehash.V3HashEvent(eventHasher, decodedEvent.V3Event); err != nil {
+				if err = simplehash.V3HashEvent(eventHasher, v3Event); err != nil {
 					return err
 				}
 				eventHash := eventHasher.Sum(nil)
 				fmt.Printf(" |%x v3hash (just the schema fields hashed)\n", eventHash)
 				if cCtx.Bool("bendump") {
-					bencode, err2 := bencodeEvent(decodedEvent.V3Event)
+					bencode, err2 := bencodeEvent(v3Event)
 					if err2 != nil {
 						return err2
 					}
@@ -141,7 +170,7 @@ func NewEventDiagCmd() *cli.Command {
 
 				leafHasher := simplehash.NewHasherV3()
 				err = leafHasher.HashEventFromV3(
-					decodedEvent.V3Event,
+					v3Event,
 					simplehash.WithPrefix([]byte{LeafTypePlain}),
 					simplehash.WithIDCommitted(eventIDTimestamp))
 				if err != nil {
