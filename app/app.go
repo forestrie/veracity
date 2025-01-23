@@ -106,7 +106,6 @@ func appDomain(appData []byte) byte {
 	}{}
 
 	decoder = json.NewDecoder(bytes.NewReader(events.Events[0]))
-	decoder.DisallowUnknownFields()
 
 	for {
 		err = decoder.Decode(&event)
@@ -122,7 +121,7 @@ func appDomain(appData []byte) byte {
 	}
 
 	// find if the event identity is assetsv2 or eventsv1 identity
-	if strings.HasPrefix(event.Identity, "assets/") {
+	if strings.HasPrefix(event.Identity, "assets/") || strings.HasPrefix(event.Identity, "publicassets/") {
 		return AssetsV2AppDomain
 	} else {
 		return EventsV1AppDomain
