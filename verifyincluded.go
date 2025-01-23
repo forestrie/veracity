@@ -144,6 +144,17 @@ Note: for publicly attested events, or shared protected events, you must use --t
 				// get the massif index for the event event
 				massifIndex := massifs.MassifIndexFromMMRIndex(cmd.massifHeight, event.MMRIndex())
 
+				// find the log tenant path if not provided
+				if tenantLogPath == "" {
+
+					var err error
+					tenantLogPath, err = event.LogTenant()
+					if err != nil {
+						return err
+					}
+
+				}
+
 				// check if we need this event is part of a different massif than the previous event
 				//
 				// if it is, we get the new massif
