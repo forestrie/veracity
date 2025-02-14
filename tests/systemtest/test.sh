@@ -138,7 +138,7 @@ testFindTrieEntrySingleEvent() {
 testFindTrieEntrySingleEventWithLocalMassifCopy() {
     # Verify the trie key for the known event is on the log at the correct position for a local log.
     PUBLIC_EVENT_PERMISSIONED_ID=${PUBLIC_EVENT_ID#"public"}
-    output=$(VERACITY_INSTALL --data-local $PROD_LOCAL_BLOB_FILE find-trie-entries --log-tenant $PROD_PUBLIC_TENANT_ID --app-id $PUBLIC_EVENT_PERMISSIONED_ID)
+    output=$($VERACITY_INSTALL --data-local $PROD_LOCAL_BLOB_FILE find-trie-entries --log-tenant $PROD_PUBLIC_TENANT_ID --app-id $PUBLIC_EVENT_PERMISSIONED_ID)
     assertEquals "verifying finding the trie entry of a known public prod event from a local log should match mmr index 663" "matches: [663]" "$output"
 }
 
