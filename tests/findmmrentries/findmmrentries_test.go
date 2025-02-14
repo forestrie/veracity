@@ -24,7 +24,7 @@ func (s *FindMMREntriesSuite) TestAssetsV2EventStdIn() {
 	veracity.AddCommands(app, true)
 
 	// note: the suite does a before & after pipe for Stdin
-	s.StdinWriteAndClose(katdata.KnownGoodPublicAssetsV1EventLaterMassif)
+	s.StdinWriteAndClose(katdata.KnownGoodPublicAssetsV2EventLaterMassif)
 
 	// redirect std out to a known pipe so we can capture it
 	rescueStdout := os.Stdout
@@ -61,7 +61,7 @@ func (s *FindMMREntriesSuite) TestAssetsV2EventAsLeafIndexStdIn() {
 	veracity.AddCommands(app, true)
 
 	// note: the suite does a before & after pipe for Stdin
-	s.StdinWriteAndClose(katdata.KnownGoodPublicAssetsV1EventLaterMassif)
+	s.StdinWriteAndClose(katdata.KnownGoodPublicAssetsV2EventLaterMassif)
 
 	// redirect std out to a known pipe so we can capture it
 	rescueStdout := os.Stdout
@@ -101,7 +101,7 @@ func (s *FindMMREntriesSuite) TestAssetsV2EventWrongMassifStdIn() {
 	veracity.AddCommands(app, true)
 
 	// note: the suite does a before & after pipe for Stdin
-	s.StdinWriteAndClose(katdata.KnownGoodPublicAssetsV1EventLaterMassif)
+	s.StdinWriteAndClose(katdata.KnownGoodPublicAssetsV2EventLaterMassif)
 
 	// redirect std out to a known pipe so we can capture it
 	rescueStdout := os.Stdout
@@ -140,7 +140,7 @@ func (s *FindMMREntriesSuite) TestAssetsV2EventCorrectMassifStdIn() {
 	veracity.AddCommands(app, true)
 
 	// note: the suite does a before & after pipe for Stdin
-	s.StdinWriteAndClose(katdata.KnownGoodPublicAssetsV1EventLaterMassif)
+	s.StdinWriteAndClose(katdata.KnownGoodPublicAssetsV2EventLaterMassif)
 
 	// redirect std out to a known pipe so we can capture it
 	rescueStdout := os.Stdout

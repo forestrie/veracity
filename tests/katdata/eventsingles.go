@@ -69,7 +69,7 @@ var (
   }
 }`)
 
-	KnownGoodPublicAssetsV1EventLaterMassif = []byte(`{
+	KnownGoodPublicAssetsV2EventLaterMassif = []byte(`{
     "identity": "publicassets/20e0864f-423c-4a09-8819-baac2ed326e4/events/effa4ea1-e96d-4272-8c06-c09453c75621",
     "asset_identity": "publicassets/20e0864f-423c-4a09-8819-baac2ed326e4",
     "event_attributes": {
