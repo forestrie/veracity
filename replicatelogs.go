@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/datatrails/go-datatrails-common/cbor"
+	"github.com/datatrails/go-datatrails-common/cose"
 	"github.com/datatrails/go-datatrails-common/logger"
 	"github.com/datatrails/go-datatrails-merklelog/massifs"
 	"github.com/datatrails/go-datatrails-merklelog/massifs/watcher"
@@ -266,6 +267,7 @@ type VerifiedReplica struct {
 	writeOpener  massifs.WriteAppendOpener
 	localReader  massifs.ReplicaReader
 	remoteReader MassifReader
+	rootReader   massifs.SealGetter 
 	cborCodec    cbor.CBORCodec
 }
 
@@ -324,7 +326,7 @@ func NewVerifiedReplica(
 
 	remoteReader := massifs.NewMassifReader(
 		logger.Sugar, reader,
-		massifs.WithSealGetter(&cmd.rootReader),
+		// massifs.WithSealGetter(&cmd.rootReader),
 	)
 
 	return &VerifiedReplica{
@@ -333,6 +335,7 @@ func NewVerifiedReplica(
 		writeOpener:  NewFileWriteOpener(),
 		localReader:  &localReader,
 		remoteReader: &remoteReader,
+		rootReader:   &cmd.rootReader,
 		cborCodec:    cmd.cborCodec,
 	}, nil
 }
@@ -441,7 +444,16 @@ func (v *VerifiedReplica) ReplicateVerifiedUpdates(
 
 	for i := startMassif; i <= endMassif; i++ {
 
-		remoteVerifyOpts := []massifs.ReaderOption{massifs.WithCBORCodec(v.cborCodec)}
+		// Note: we have to fetch the seal before the massif, otherwise we can lose a rase with the builder
+		// See bug#10530
+		remoteSealReader, err := NewPrefetchingSealReader(ctx, v.rootReader, tenantIdentity, i)
+		if err != nil {
+			return err
+		}
+		remoteVerifyOpts := []massifs.ReaderOption{
+			massifs.WithCBORCodec(v.cborCodec),
+			massifs.WithSealGetter(remoteSealReader),
+		}
 		if local != nil {
 			// Promote the trusted base state to a V1 state if it is a V0 state.
 			baseState, err := trustedBaseState(local)
@@ -676,4 +688,43 @@ func readTenantMassifChanges(ctx context.Context, cCtx *cli.Context, cmd *CmdCtx
 
 	// No explicit config and --all not set, read from stdin
 	return stdinToDecodedTenantMassifs()
+}
+
+// prefetchingSealReader pre-fetches the seal for the massif to avoid racing with the
+// sealer.  If the massif is read first, the log can grow and a a new seal can
+// be applied to the *longer* log. At which point the previously read copy of
+// the massif will be "to short" for the seal.
+// See Bug#10530
+type prefetchingSealReader struct {
+	msg            *cose.CoseSign1Message
+	state          massifs.MMRState
+	tenantIdentity string
+	massifIndex    uint32
+}
+
+var ErrInconsistentUseOfPrefetchedSeal = errors.New("prefetching signed root reader used inconsistently")
+
+func NewPrefetchingSealReader(ctx context.Context, sealGetter massifs.SealGetter, tenantIdentity string, massifIndex uint32) (*prefetchingSealReader, error) {
+
+	msg, state, err := sealGetter.GetSignedRoot(ctx, tenantIdentity, massifIndex)
+	if err != nil {
+		return nil, err
+	}
+	reader := prefetchingSealReader{
+		msg:            msg,
+		state:          state,
+		tenantIdentity: tenantIdentity,
+		massifIndex:    massifIndex,
+	}
+	return &reader, nil
+}
+
+func (r *prefetchingSealReader) GetSignedRoot(ctx context.Context, tenantIdentity string, massifIndex uint32, opts ...massifs.ReaderOption) (*cose.CoseSign1Message, massifs.MMRState, error) {
+	if tenantIdentity != r.tenantIdentity {
+		return nil, massifs.MMRState{}, fmt.Errorf("%w: tenant requested: %s, tenant prefetched: %s", ErrInconsistentUseOfPrefetchedSeal, tenantIdentity, r.tenantIdentity)
+	}
+	if massifIndex != r.massifIndex {
+		return nil, massifs.MMRState{}, fmt.Errorf("%w: massif requested: %d, massif prefetched: %d", ErrInconsistentUseOfPrefetchedSeal, massifIndex, r.massifIndex)
+	}
+	return r.msg, r.state, nil
 }
