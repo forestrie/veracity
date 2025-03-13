@@ -267,7 +267,7 @@ type VerifiedReplica struct {
 	writeOpener  massifs.WriteAppendOpener
 	localReader  massifs.ReplicaReader
 	remoteReader MassifReader
-	rootReader   massifs.SealGetter 
+	rootReader   massifs.SealGetter
 	cborCodec    cbor.CBORCodec
 }
 
@@ -326,7 +326,6 @@ func NewVerifiedReplica(
 
 	remoteReader := massifs.NewMassifReader(
 		logger.Sugar, reader,
-		// massifs.WithSealGetter(&cmd.rootReader),
 	)
 
 	return &VerifiedReplica{
