@@ -472,8 +472,9 @@ func (v *VerifiedReplica) ReplicateVerifiedUpdates(
 			massifs.WithSealGetter(remoteSealReader),
 		}
 		if local != nil {
+			var baseState massifs.MMRState
 			// Promote the trusted base state to a V1 state if it is a V0 state.
-			baseState, err := trustedBaseState(local)
+			baseState, err = trustedBaseState(local)
 			if err != nil {
 				return err
 			}
