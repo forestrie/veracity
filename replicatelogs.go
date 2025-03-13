@@ -39,16 +39,34 @@ const (
 )
 
 var (
-	ErrChangesFlagIsExclusive         = errors.New("use --changes Or --massif and --tenant, not both")
-	ErrNewReplicaNotEmpty             = errors.New("the local directory for a new replica already exists")
-	ErrSealNotFound                   = errors.New("seal not found")
-	ErrSealVerifyFailed               = errors.New("the seal signature verification failed")
-	ErrFailedCheckingConsistencyProof = errors.New("failed to check a consistency proof")
-	ErrFailedToCreateReplicaDir       = errors.New("failed to create a directory needed for local replication")
-	ErrRequiredOption                 = errors.New("a required option was not provided")
-	ErrRemoteLogTruncated             = errors.New("the local replica indicates the remote log has been truncated")
-	ErrRemoteLogInconsistentRootState = errors.New("the local replica root state disagrees with the remote")
+	ErrChangesFlagIsExclusive          = errors.New("use --changes Or --massif and --tenant, not both")
+	ErrNewReplicaNotEmpty              = errors.New("the local directory for a new replica already exists")
+	ErrSealNotFound                    = errors.New("seal not found")
+	ErrSealVerifyFailed                = errors.New("the seal signature verification failed")
+	ErrFailedCheckingConsistencyProof  = errors.New("failed to check a consistency proof")
+	ErrFailedToCreateReplicaDir        = errors.New("failed to create a directory needed for local replication")
+	ErrRequiredOption                  = errors.New("a required option was not provided")
+	ErrRemoteLogTruncated              = errors.New("the local replica indicates the remote log has been truncated")
+	ErrRemoteLogInconsistentRootState  = errors.New("the local replica root state disagrees with the remote")
+	ErrInconsistentUseOfPrefetchedSeal = errors.New("prefetching signed root reader used inconsistently")
 )
+
+// prefetchingSealReader pre-fetches the seal for the massif to avoid racing with the
+// sealer.  If the massif is read first, the log can grow and a a new seal can
+// be applied to the *longer* log. At which point the previously read copy of
+// the massif will be "to short" for the seal.
+// See Bug#10530
+type prefetchingSealReader struct {
+	msg            *cose.CoseSign1Message
+	state          massifs.MMRState
+	tenantIdentity string
+	massifIndex    uint32
+}
+
+type changeCollector struct {
+	log         logger.Logger
+	watchOutput string
+}
 
 // NewReplicateLogsCmd updates a local replica of a remote log, verifying the mutual consistency of the two before making any changes.
 //
@@ -606,11 +624,6 @@ func peakBaggedRoot(state massifs.MMRState) []byte {
 	return mmr.HashPeaksRHS(sha256.New(), state.Peaks)
 }
 
-type changeCollector struct {
-	log         logger.Logger
-	watchOutput string
-}
-
 func (c *changeCollector) Logf(msg string, args ...any) {
 	if c.log == nil {
 		return
@@ -688,20 +701,6 @@ func readTenantMassifChanges(ctx context.Context, cCtx *cli.Context, cmd *CmdCtx
 	// No explicit config and --all not set, read from stdin
 	return stdinToDecodedTenantMassifs()
 }
-
-// prefetchingSealReader pre-fetches the seal for the massif to avoid racing with the
-// sealer.  If the massif is read first, the log can grow and a a new seal can
-// be applied to the *longer* log. At which point the previously read copy of
-// the massif will be "to short" for the seal.
-// See Bug#10530
-type prefetchingSealReader struct {
-	msg            *cose.CoseSign1Message
-	state          massifs.MMRState
-	tenantIdentity string
-	massifIndex    uint32
-}
-
-var ErrInconsistentUseOfPrefetchedSeal = errors.New("prefetching signed root reader used inconsistently")
 
 func NewPrefetchingSealReader(ctx context.Context, sealGetter massifs.SealGetter, tenantIdentity string, massifIndex uint32) (*prefetchingSealReader, error) {
 
