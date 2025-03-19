@@ -13,7 +13,7 @@ func cfgLogging(cmd *CmdCtx, cCtx *cli.Context) error {
 	if logLevel == "" {
 		logLevel = "INFO"
 	}
-	if logLevel == "TEST" {
+	if logLevel == "NOOP" {
 		cmd.log = &logger.WrappedLogger{
 			SugaredLogger: zap.NewNop().Sugar(),
 		}

@@ -51,9 +51,18 @@ func mustHashFile(t *testing.T, filename string) []byte {
 // seal that was fetched, more items are added to the massif. Thus the massif
 // data fetched does not containe all the items that are covered by the seal.
 //
-// NOTICE: this test is unavoidably *flaky* on the PASS side. It will mostly
-// catch the race, but occasionally it will pass. It is not possible to
-// faithfully test a race condition in a "not flaky" way.
+// NOTICE: this test is unavoidably *theoretically* flaky on the PASS side.
+// In that it can fail to trigger the race condition and so PASS.
+// However, If the test is succsfull in triggering the race condition, it will
+// always FAIL.
+// Further, in development against the known broken code, we have never seen
+// this test take more than 3 attempts to cause the race As configured
+//
+// The implication of this is that there is a small chance this test will not
+// imediately catch the regresion, but soon after. This means that on a FAIL
+// from this test, it is 100% a return of the race condition and should be
+// investigated. There is a tiny chance the race may have been re-introduced by
+// an earlier change than is associated with the fail.
 func (s *ReplicateLogsCmdSuite) TestRegression10530() {
 
 	tests := []struct {
