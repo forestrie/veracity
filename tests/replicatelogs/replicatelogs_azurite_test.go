@@ -56,10 +56,6 @@ func mustHashFile(t *testing.T, filename string) []byte {
 // faithfully test a race condition in a "not flaky" way.
 func (s *ReplicateLogsCmdSuite) TestRegression10530() {
 
-	//s.ReplaceStdout()
-
-	// logger.New("TestRegression10530")
-	// defer logger.OnExit()
 	tests := []struct {
 		name string
 		// attempts mitigates the inherent flakyness of detecting a race bug
@@ -110,7 +106,7 @@ func (s *ReplicateLogsCmdSuite) TestRegression10530() {
 
 					err := app.Run([]string{
 						"veracity",
-						"--loglevel", "TEST", // sets the zap noop logger which avoids a race with our logging package.
+						"--loglevel", "NOOP", // sets the zap noop logger which avoids a race with our logging package.
 						"--envauth", // uses the emulator
 						"--container", tc.TestConfig.Container,
 						"--data-url", s.Env.AzuriteVerifiableDataURL,
