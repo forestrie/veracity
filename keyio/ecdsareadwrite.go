@@ -1,4 +1,4 @@
-package veracity
+package keyio
 
 import (
 	"crypto/ecdsa"
@@ -9,7 +9,7 @@ import (
 	"math/big"
 	"os"
 
-	dtcose "github.com/datatrails/go-datatrails-common/cose"
+	commoncose "github.com/datatrails/go-datatrails-common/cose"
 	"github.com/fxamacker/cbor/v2"
 )
 
@@ -112,10 +112,9 @@ func WriteECDSAPublicCOSE(
 	pubFile string,
 	publicKey *ecdsa.PublicKey,
 ) (string, error) {
-
 	var err error
 
-	if _, err = writeCoseECDSAPublicKey(pubFile, publicKey); err != nil {
+	if _, err = WriteCoseECDSAPublicKey(pubFile, publicKey); err != nil {
 		return "", err
 	}
 	return pubFile, nil
@@ -125,10 +124,9 @@ func WriteECDSAPrivateCOSE(
 	privFile string,
 	privateKey *ecdsa.PrivateKey,
 ) (string, error) {
-
 	var err error
 
-	if _, err = writeCoseECDSAPrivateKey(privFile, privateKey); err != nil {
+	if _, err = WriteCoseECDSAPrivateKey(privFile, privateKey); err != nil {
 		return "", err
 	}
 	return privFile, nil
@@ -136,25 +134,25 @@ func WriteECDSAPrivateCOSE(
 
 // Encode private key to COSE_Key format (as CBOR bytes)
 func encodePrivateKeyToCOSE(key *ecdsa.PrivateKey) ([]byte, error) {
-	m := map[int]interface{}{
-		dtcose.KeyTypeLabel:   int64(dtcose.KeyTypeEC2),
-		dtcose.AlgorithmLabel: -7, // ES256 (ECDSA w/ SHA-256)
-		dtcose.ECCurveLabel:   1,  // P-256
-		dtcose.ECXLabel:       key.PublicKey.X.Bytes(),
-		dtcose.ECYLabel:       key.PublicKey.Y.Bytes(),
-		dtcose.ECDLabel:       key.D.Bytes(),
+	m := map[int64]interface{}{
+		commoncose.KeyTypeLabel:   int64(commoncose.KeyTypeEC2),
+		commoncose.AlgorithmLabel: -7, // ES256 (ECDSA w/ SHA-256)
+		commoncose.ECCurveLabel:   1,  // P-256
+		commoncose.ECXLabel:       key.PublicKey.X.Bytes(),
+		commoncose.ECYLabel:       key.PublicKey.Y.Bytes(),
+		commoncose.ECDLabel:       key.D.Bytes(),
 	}
 	return cbor.Marshal(m)
 }
 
 // Encode public key to COSE_Key format (as CBOR bytes)
 func encodePublicKeyToCOSE(key *ecdsa.PublicKey) ([]byte, error) {
-	m := map[int]interface{}{
-		dtcose.KeyTypeLabel:   int64(dtcose.KeyTypeEC2),
-		dtcose.AlgorithmLabel: -7, // ES256 (ECDSA w/ SHA-256)
-		dtcose.ECCurveLabel:   1,  // P-256
-		dtcose.ECXLabel:       key.X.Bytes(),
-		dtcose.ECYLabel:       key.Y.Bytes(),
+	m := map[int64]interface{}{
+		commoncose.KeyTypeLabel:   int64(commoncose.KeyTypeEC2),
+		commoncose.AlgorithmLabel: -7, // ES256 (ECDSA w/ SHA-256)
+		commoncose.ECCurveLabel:   1,  // P-256
+		commoncose.ECXLabel:       key.X.Bytes(),
+		commoncose.ECYLabel:       key.Y.Bytes(),
 	}
 	return cbor.Marshal(m)
 }
@@ -173,7 +171,7 @@ func decodeECDSAPrivateKey(
 	}
 
 	d := big.NewInt(0)
-	d.SetBytes(m[dtcose.ECDLabel].([]byte))
+	d.SetBytes(m[commoncose.ECDLabel].([]byte))
 
 	privateKey := &ecdsa.PrivateKey{
 		PublicKey: *publicKey,
@@ -186,7 +184,6 @@ func decodeECDSAPublicKey(
 	data []byte,
 	expectedStandardCurve ...string,
 ) (*ecdsa.PublicKey, error) {
-
 	var m map[int64]interface{}
 	if err := cbor.Unmarshal(data, &m); err != nil {
 		return nil, err
@@ -198,8 +195,11 @@ func decodeECDSAPublicKeyFromMap(
 	m map[int64]interface{},
 	expectedStandardCurve ...string,
 ) (*ecdsa.PublicKey, error) {
+	ecKey, err := commoncose.NewECCoseKey(m)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get public key from COSE key: %w", err)
+	}
 
-	ecKey, err := dtcose.NewECCoseKey(m)
 	genericKey, err := ecKey.PublicKey()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get public key from COSE key: %w", err)
@@ -219,12 +219,11 @@ func decodeECDSAPublicKeyFromMap(
 	return publicKey, nil
 }
 
-func writeCoseECDSAPrivateKey(
+func WriteCoseECDSAPrivateKey(
 	fileName string,
 	privateKey *ecdsa.PrivateKey,
 	perms ...os.FileMode,
 ) ([]byte, error) {
-
 	var err error
 	var data []byte
 	if data, err = encodePrivateKeyToCOSE(privateKey); err != nil {
@@ -243,12 +242,11 @@ func writeCoseECDSAPrivateKey(
 	return data, nil
 }
 
-func writeCoseECDSAPublicKey(
+func WriteCoseECDSAPublicKey(
 	fileName string,
 	publicKey *ecdsa.PublicKey,
 	perms ...os.FileMode,
 ) ([]byte, error) {
-
 	var err error
 	var data []byte
 	if data, err = encodePublicKeyToCOSE(publicKey); err != nil {

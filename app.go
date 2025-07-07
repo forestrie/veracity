@@ -1,3 +1,4 @@
+// Package veracity provides the main application for the Veracity CLI tool.
 package veracity
 
 import (
@@ -7,7 +8,6 @@ import (
 )
 
 func NewApp(version string, ikwid bool) *cli.App {
-
 	cli.VersionPrinter = func(cCtx *cli.Context) {
 		fmt.Println(cCtx.App.Version)
 	}

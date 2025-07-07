@@ -1,3 +1,4 @@
+// Package main provides the entry point for the Veracity CLI application.
 package main
 
 import (
@@ -21,7 +22,6 @@ var (
 )
 
 func main() {
-
 	versionString := "unknown"
 	if version != "" {
 		// versionString = fmt.Sprintf("%s %s %s", version, commit, buildDate)
