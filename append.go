@@ -1,6 +1,7 @@
 package veracity
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -190,8 +191,8 @@ func NewAppendCmd() *cli.Command {
 				return fmt.Errorf("failed to read verified head massif: %w", err)
 			}
 
-			mmrSizeLast := verified.RangeCount()
-			fmt.Printf("%8d verified-size\n", mmrSizeLast)
+			mmrSizeOrig := verified.RangeCount()
+			fmt.Printf("%8d verified-size\n", mmrSizeOrig)
 			verified.Tags = map[string]string{}
 
 			//
@@ -202,6 +203,14 @@ func NewAppendCmd() *cli.Command {
 				return err
 			}
 			fmt.Printf("%d statements registered\n", len(statements))
+			mmrSizeNew := verified.RangeCount()
+			peakHashesNew, err := mmr.PeakHashes(&verified.MassifContext, mmrSizeNew-1)
+			if err != nil {
+				return err
+			}
+			for i, peak := range peakHashesNew {
+				fmt.Printf("peak[%d]: %x\n", i, peak)
+			}
 
 			alg, err := commoncose.CoseAlgForEC(sealingKey.PublicKey)
 			if err != nil {
@@ -232,7 +241,8 @@ func NewAppendCmd() *cli.Command {
 
 			// To create the checkpoint, we first check that the current state
 			// contains the previously verified state. This necessarily produces
-			// the proof material which we can then include with the new checkpoint.
+			// and verifies the new accumulator which we can then include with
+			// the new checkpoint.
 			ok, peaksB, err := mmr.CheckConsistency(
 				verified, sha256.New(),
 				cp.MMRSizeA, cp.MMRSizeB, verified.MMRState.Peaks)
@@ -295,11 +305,11 @@ func NewAppendCmd() *cli.Command {
 			// *any* leaf at any time, given only the specific massif (tile)
 			// that leaf was registered in.  and its associated checkpoint.
 			//
-			proof, err := mmr.InclusionProof(&verified.MassifContext, state.MMRSize-1, mmrStatement.LeafIndex)
+			proof, err := mmr.InclusionProof(&verified.MassifContext, state.MMRSize-1, mmrStatement.MMRIndexLeaf)
 			if err != nil {
 				return fmt.Errorf(
 					"failed to generating inclusion proof: %d in MMR(%d), %v",
-					mmrStatement.LeafIndex, verified.MMRState.MMRSize, err)
+					mmrStatement.MMRIndexLeaf, verified.MMRState.MMRSize, err)
 			}
 
 			//
@@ -333,6 +343,15 @@ func NewAppendCmd() *cli.Command {
 					err, state.MMRSize)
 			}
 
+			// To avoid creating invalid receipts due to bugs in this demo code, check the root matches the appropriate peak.
+			root := mmr.IncludedRoot(sha256.New(), mmrStatement.MMRIndexLeaf, mmrStatement.LeafHash, proof)
+
+			if !bytes.Equal(root, peaksB[peakIndex]) {
+				return fmt.Errorf(
+					"%w: root %x of leaf %d in MMR(%d) does not match peak %d %x",
+					ErrVerifyInclusionFailed, root, mmrStatement.MMRIndexLeaf, state.MMRSize, peakIndex, state.Peaks[peakIndex])
+			}
+
 			//
 			// Make the MMR draft receipt by attaching the inclusion proof to the Unprotected header
 			//
@@ -340,13 +359,25 @@ func NewAppendCmd() *cli.Command {
 
 			verifiableProofs := massifs.MMRiverVerifiableProofs{
 				InclusionProofs: []massifs.MMRiverInclusionProof{{
-					Index:         mmrStatement.LeafIndex,
+					Index:         mmrStatement.MMRIndexLeaf,
 					InclusionPath: proof,
 				}},
 			}
 
-			signed.Headers.Unprotected[massifs.VDSCoseReceiptProofsTag] = verifiableProofs
+			tagOriginSubject := int64(-257)
+			tagOriginIssuer := tagOriginSubject - 1
+			tagLeafHash := tagOriginSubject - 2
+			tagIDTimestamp := tagOriginSubject - 3
+			tagExtraBytes := tagOriginSubject - 4
 
+			signed.Headers.Unprotected[massifs.VDSCoseReceiptProofsTag] = verifiableProofs
+			// these values would usually be provided by the application, or obtained directly from any replica.
+			// the unprotected headers are not signed, and are intended for this sort of convenience.
+			signed.Headers.Unprotected[tagOriginIssuer] = mmrStatement.Claims.Issuer
+			signed.Headers.Unprotected[tagOriginSubject] = mmrStatement.Claims.Subject
+			signed.Headers.Unprotected[tagIDTimestamp] = mmrStatement.IDTimestamp
+			signed.Headers.Unprotected[tagExtraBytes] = mmrStatement.ExtraBytes
+			signed.Headers.Unprotected[tagLeafHash] = mmrStatement.LeafHash
 			//
 			// Save the receipt to a file
 			//
@@ -357,7 +388,7 @@ func NewAppendCmd() *cli.Command {
 
 			receiptFileName := cCtx.String("receipt-file")
 			if receiptFileName == "" {
-				receiptFileName = fmt.Sprintf("receipt-%d.cbor", mmrStatement.LeafIndex)
+				receiptFileName = fmt.Sprintf("receipt-%d.cbor", mmrStatement.MMRIndexLeaf)
 			}
 			if err := os.WriteFile(receiptFileName, receiptCbor, os.FileMode(0644)); err != nil {
 				return fmt.Errorf("failed to write receipt file %s: %w", receiptFileName, err)
@@ -399,12 +430,13 @@ func NewAppendCmd() *cli.Command {
 				fmt.Printf("wrote sealer key to file %s\n", sealerKeyFile)
 
 				sealerKeyFile = cCtx.String("sealer-public-key-pem")
-				if sealerKeyFile != "" {
-					if _, err := keyio.WriteCoseECDSAPublicKey(sealerKeyFile, &sealingKey.PublicKey); err != nil {
-						return fmt.Errorf("failed to write sealer key to file %s: %w", sealerKeyFile, err)
-					}
-					fmt.Printf("wrote sealer public key to file %s\n", sealerKeyFile)
+				if sealerKeyFile == "" {
+					sealerKeyFile = keyio.ECDSAPublicDefaultPEMFileName
 				}
+				if _, err := keyio.WriteCoseECDSAPublicKey(sealerKeyFile, &sealingKey.PublicKey); err != nil {
+					return fmt.Errorf("failed to write sealer key to file %s: %w", sealerKeyFile, err)
+				}
+				fmt.Printf("wrote sealer public key to file %s\n", sealerKeyFile)
 			}
 			return nil
 		},
@@ -440,7 +472,9 @@ func addStatements(cmd *CmdCtx, cCtx *cli.Context, massif *massifs.MassifContext
 		if err != nil {
 			return nil, fmt.Errorf("failed to read signed statement from file %s: %w", cCtx.String("signed-statement"), err)
 		}
-		mmrStatement.LeafIndex = massif.RangeCount() - 1
+
+		// the *next* index to be added is the current *count*
+		mmrStatement.MMRIndexLeaf = massif.RangeCount()
 
 		_, err = massif.AddHashedLeaf(
 			sha256.New(),
@@ -457,10 +491,23 @@ func addStatements(cmd *CmdCtx, cCtx *cli.Context, massif *massifs.MassifContext
 
 		statements = append(statements, *mmrStatement)
 
-		fmt.Printf("index         : %d\n", mmrStatement.LeafIndex)
-		fmt.Printf(" issuer        : %s\n", mmrStatement.Claims.Issuer)
-		fmt.Printf(" leaf-hash     : %x\n", mmrStatement.LeafHash)
-		fmt.Printf(" statement-hash: %x\n", mmrStatement.Hash)
+		fmt.Printf("index             : %d\n", mmrStatement.MMRIndexLeaf)
+		fmt.Printf(" issuer           : %s\n", mmrStatement.Claims.Issuer)
+		fmt.Printf(" idtimestamp      : %x\n", mmrStatement.IDTimestamp)
+		fmt.Printf(" extraBytes       : %x\n", mmrStatement.ExtraBytes)
+		fmt.Printf(" leaf-hash        : %x\n", mmrStatement.LeafHash)
+		fmt.Printf(" statement-hash   : %x\n", mmrStatement.Hash)
+		fmt.Printf(" node count       : %d\n", (len(massif.Data)-int(massif.LogStart()))/32)
+
+		value, err := massif.Get(mmrStatement.MMRIndexLeaf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get leaf value for index %d: %w", mmrStatement.MMRIndexLeaf, err)
+		}
+		if !bytes.Equal(value, mmrStatement.LeafHash) {
+			// this will mean a bug in the hacked up code if it catches
+			return nil, fmt.Errorf("leaf hash %x does not match expected value %x for index %d",
+				value, mmrStatement.LeafHash, mmrStatement.MMRIndexLeaf)
+		}
 	}
 	return statements, nil
 }

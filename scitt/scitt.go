@@ -28,8 +28,8 @@ type MMRStatement struct {
 	// of this pseudo scitt support, it is the first 24 bytes of the Hash
 	ExtraBytes []byte
 	// The IDTimestamp that contributed to the leaf hash.
-	IDTimestamp uint64
-	LeafIndex   uint64
+	IDTimestamp  uint64
+	MMRIndexLeaf uint64
 }
 
 type idTimetampGenerator interface {
@@ -69,6 +69,7 @@ func NewMMRStatementFromFile(fileName string, idState idTimetampGenerator, polic
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate snowflake id: %w", err)
 	}
+	// m.IDTimestamp = 0 // XXX: temporary stabilize the hash
 
 	m.LeafHash, err = mmriver.MMREntryVersion1(m.ExtraBytes, m.IDTimestamp, m.Content)
 	if err != nil {

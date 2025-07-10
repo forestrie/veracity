@@ -38,8 +38,8 @@ func ReadVerifiedHeadMassif(options ReaderOptions, baseOpts ...massifs.DirCacheO
 	var err error
 
 	opts := []massifs.DirCacheOption{
-		massifs.WithDirCacheMassifLister(NewDirLister()),
-		massifs.WithDirCacheSealLister(NewDirLister()),
+		massifs.WithDirCacheMassifLister(NewSuffixDirLister(".log")),
+		massifs.WithDirCacheSealLister(NewSuffixDirLister(".sth")),
 		massifs.WithReaderOption(massifs.WithMassifHeight(options.MassifHeight)),
 		massifs.WithReaderOption(massifs.WithCBORCodec(options.CBORCodec)),
 	}
@@ -64,12 +64,20 @@ func ReadVerifiedHeadMassif(options ReaderOptions, baseOpts ...massifs.DirCacheO
 	massifInfo := massifCache.GetInfo()
 	fmt.Printf("Read massif %d to %d from %s\n", massifInfo.FirstMassifIndex, massifInfo.HeadMassifIndex, massifInfo.Directory)
 
-	sealCache, err := cache.ReadSealDirEntry(options.SealsDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read massif dir entry: %w", err)
+	var sealCache massifs.DirCacheEntry
+
+	if options.MassifsDir == options.SealsDir {
+		sealCache = massifCache
+		err = cache.FindSealFiles(options.MassifsDir)
+	} else {
+		sealCache, err = cache.ReadSealDirEntry(options.SealsDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read massif dir entry: %w", err)
+		}
 	}
+
 	sealInfo := sealCache.GetInfo()
-	fmt.Printf("Read seals for massifs %d to %d from %s\n", sealInfo.FirstMassifIndex, sealInfo.HeadMassifIndex, sealInfo.Directory)
+	fmt.Printf("Read seals for massifs %d to %d from %s\n", sealInfo.FirstSealIndex, sealInfo.HeadSealIndex, sealInfo.Directory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read massif dir entry: %w", err)
 	}
