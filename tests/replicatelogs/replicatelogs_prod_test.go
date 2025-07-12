@@ -3,10 +3,8 @@
 package verifyconsistency
 
 import (
-	"path/filepath"
-
-	"github.com/datatrails/go-datatrails-merklelog/massifs"
 	"github.com/datatrails/veracity"
+	"github.com/forestrie/go-merklelog-datatrails/datatrails"
 )
 
 // Test that the watch command returns no error or that the error is "no changes"
@@ -27,9 +25,11 @@ func (s *ReplicateLogsCmdSuite) TestReplicateFirstPublicMassif() {
 		"--massif", "1",
 	})
 	s.NoError(err)
+	logID := datatrails.TenantID2LogID(s.Env.PublicTenantId)
 
-	expectMassifFile := filepath.Join(replicaDir, massifs.ReplicaRelativeMassifPath(s.Env.PublicTenantId, 0))
+	expectMassifFile := mustMassifFilename(s.T(), replicaDir, logID, 0)
 	s.FileExistsf(expectMassifFile, "the replicated massif should exist")
-	expectSealFile := filepath.Join(replicaDir, massifs.ReplicaRelativeSealPath(s.Env.PublicTenantId, 0))
-	s.FileExistsf(expectSealFile, "the replicated seal should exist")
+
+	expectCheckpointFile := mustCheckpointFilename(s.T(), replicaDir, logID, 0)
+	s.FileExistsf(expectCheckpointFile, "the replicated checkpoint should exist")
 }

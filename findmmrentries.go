@@ -8,11 +8,13 @@ import (
 	"strings"
 
 	"github.com/datatrails/go-datatrails-common/logger"
-	"github.com/datatrails/go-datatrails-logverification/logverification/app"
 	"github.com/datatrails/go-datatrails-merklelog/massifs"
+	"github.com/datatrails/go-datatrails-merklelog/massifs/storage"
 	"github.com/datatrails/go-datatrails-merklelog/mmr"
 	"github.com/datatrails/go-datatrails-serialization/eventsv1"
-	veracityapp "github.com/datatrails/veracity/app"
+	appdata "github.com/forestrie/go-merklelog-datatrails/appdata"
+	"github.com/forestrie/go-merklelog-datatrails/appentry"
+	"github.com/forestrie/go-merklelog-datatrails/datatrails"
 	"github.com/urfave/cli/v2"
 )
 
@@ -27,8 +29,9 @@ const (
 // findMMREntries searchs the log of the given log tenant for matching mmrEntries given the app entries
 // and returns the leaf indexes of all the matches as well as the number of mmr entries considered
 func findMMREntries(
+	ctx context.Context,
 	log logger.Logger,
-	massifReader MassifReader,
+	massifReader massifs.ObjectReader,
 	tenantLogPath string,
 	massifStartIndex int64,
 	massifEndIndex int64,
@@ -54,15 +57,10 @@ func findMMREntries(
 			break
 		}
 
-		massifContext, err := massifReader.GetMassif(context.Background(), tenantLogPath, uint64(massifIndex))
+		massifContext, err := massifs.GetMassifContext(ctx, massifReader, uint32(massifIndex))
 
 		// check if we have reached the last massif for the log tenant
-		if errors.Is(err, massifs.ErrMassifNotFound) {
-			break
-		}
-
-		// check if we have reached the last massif for local log
-		if errors.Is(err, massifs.ErrLogFileMassifNotFound) {
+		if errors.Is(err, storage.ErrDoesNotExist) {
 			break
 		}
 
@@ -124,10 +122,10 @@ func findMMREntries(
 					}
 				}
 
-				entry := app.NewAppEntry(
+				entry := appentry.NewAppEntry(
 					"",
 					[]byte{},
-					app.NewMMREntryFields(
+					appentry.NewMMREntryFields(
 						0,
 						serializedBytes,
 					),
@@ -223,7 +221,7 @@ func NewFindMMREntriesCmd() *cli.Command {
 
 			appEntryFileName := cCtx.String(appEntryFileFlagName)
 
-			appEntry, err := veracityapp.ReadAppData(appEntryFileName == "", appEntryFileName)
+			appEntry, err := appdata.ReadAppData(appEntryFileName == "", appEntryFileName)
 			if err != nil {
 				return err
 			}
@@ -248,26 +246,35 @@ func NewFindMMREntriesCmd() *cli.Command {
 				return err
 			}
 
-			if err = cfgMassifReader(cmd, cCtx); err != nil {
+			if err = cfgMassifFmt(cmd, cCtx); err != nil {
 				return err
 			}
 
-			cmd.log.Debugf("app entry: %x", appEntry)
+			var reader readerSelector
+			if reader, err = cfgMassifReader(cmd, cCtx); err != nil {
+				return err
+			}
+			logID := datatrails.TenantID2LogID(logTenant)
+			if err := reader.SelectLog(context.Background(), logID); err != nil {
+				return fmt.Errorf("could not select log for tenant %q: %w", logTenant, err)
+			}
+			cmd.Log.Debugf("app entry: %x", appEntry)
 
 			leafIndexMatches, entriesConsidered, err := findMMREntries(
-				cmd.log,
-				cmd.massifReader,
+				context.Background(),
+				cmd.Log,
+				reader,
 				tenantLogPath,
 				massifStartIndex,
 				massifEndIndex,
-				cmd.massifHeight,
+				cmd.MassifFmt.MassifHeight,
 				appEntry,
 			)
 			if err != nil {
 				return err
 			}
 
-			cmd.log.Debugf("entries considered: %v", entriesConsidered)
+			cmd.Log.Debugf("entries considered: %v", entriesConsidered)
 
 			// if we want the leaf index matches log them and return
 			if asLeafIndexes {

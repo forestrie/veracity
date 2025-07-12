@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 
-	"github.com/datatrails/go-datatrails-common/cbor"
 	"github.com/datatrails/go-datatrails-merklelog/massifs"
 	"github.com/urfave/cli/v2"
+	"github.com/veraison/go-cose"
 )
 
 func NewReceiptCmd() *cli.Command {
@@ -49,15 +50,34 @@ func NewReceiptCmd() *cli.Command {
 			}
 
 			log := func(m string, args ...any) {
-				cmd.log.Infof(m, args...)
+				cmd.Log.Infof(m, args...)
 			}
 
-			dataUrl := cCtx.String("data-url")
+			if err = cfgMassifFmt(cmd, cCtx); err != nil {
+				return err
+			}
 
-			reader, err := cfgReader(cmd, cCtx, dataUrl == "")
+			reader, err := newMassifReader(cmd, cCtx)
 			if err != nil {
 				return err
 			}
+
+			codec , err := massifs.NewCBORCodec()
+			if err != nil {
+				return err
+			}
+
+			var verifier cose.Verifier
+
+			if cmd.CheckpointPublic.Public == nil {
+				return errors.New("checkpoint public key is required")
+			}
+
+			verifier, err = cose.NewVerifier(cmd.CheckpointPublic.Alg, cmd.CheckpointPublic.Public)
+			if err != nil {
+				return err
+			}
+
 			tenantIdentity := cCtx.String("tenant")
 			if tenantIdentity == "" {
 				return fmt.Errorf("tenant identity is required")
@@ -67,21 +87,10 @@ func NewReceiptCmd() *cli.Command {
 			mmrIndex := cCtx.Uint64("mmrindex")
 			massifHeight := uint8(cCtx.Int64("height"))
 
-			// TODO: local replica receipts, its not a big lift, the local reader used by replicatelogs
-			// implements the necessary interface for NewReceipt.
-			var cborCodec cbor.CBORCodec
-			if cborCodec, err = massifs.NewRootSignerCodec(); err != nil {
-				return err
-			}
-			sealReader := massifs.NewSignedRootReader(cmd.log, reader, cborCodec)
-			massifReader := massifs.NewMassifReader(
-				cmd.log, reader,
-				massifs.WithSealGetter(&sealReader),
-				massifs.WithCBORCodec(cborCodec),
-			)
-
 			signedReceipt, err := massifs.NewReceipt(
-				context.Background(), massifHeight, tenantIdentity, mmrIndex, &massifReader,
+				context.Background(), reader,
+				&codec, verifier,
+				massifHeight, mmrIndex,
 			)
 			if err != nil {
 				return err

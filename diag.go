@@ -29,30 +29,34 @@ func NewDiagCmd() *cli.Command {
 		},
 		Action: func(cCtx *cli.Context) error {
 			var err error
+			var massif massifs.MassifContext
+			var reader massifs.ObjectReader
+
+			ctx := context.Background()
 
 			cmd := &CmdCtx{}
-			if err = cfgMassifReader(cmd, cCtx); err != nil {
+			if reader, err = cfgMassifReader(cmd, cCtx); err != nil {
 				return err
 			}
-			if cmd.massifHeight == 0 {
+			if cmd.MassifFmt.MassifHeight == 0 {
 				return fmt.Errorf("massif height can't be zero")
 			}
 
 			fmt.Printf("%8d trie-header-start\n", massifs.TrieHeaderStart())
 			fmt.Printf("%8d trie-data-start\n", massifs.TrieDataStart())
-			fmt.Printf("%8d peak-stack-start\n", massifs.PeakStackStart(cmd.massifHeight))
+			fmt.Printf("%8d peak-stack-start\n", massifs.PeakStackStart(cmd.MassifFmt.MassifHeight))
 
 			// support identifying the massif implicitly via the index of a log
 			// entry. note that mmrIndex 0 is just handled as though the caller
 			// asked for massifIndex 0
 			mmrIndex := cCtx.Uint64("mmrindex")
 			signedMassifIndex := cCtx.Int64("massif")
-			massifIndex := uint64(signedMassifIndex)
+			massifIndex := uint32(signedMassifIndex)
 			if mmrIndex > uint64(0) && signedMassifIndex == -1 {
-				massifIndex = massifs.MassifIndexFromMMRIndex(cmd.massifHeight, mmrIndex)
+				massifIndex = uint32(massifs.MassifIndexFromMMRIndex(cmd.MassifFmt.MassifHeight, mmrIndex))
 			}
-			fmt.Printf("%8d peak-stack-len\n", massifs.PeakStackLen(massifIndex))
-			logStart := massifs.PeakStackEnd(massifIndex, cmd.massifHeight)
+			fmt.Printf("%8d peak-stack-len\n", massifs.PeakStackLen(uint64(massifIndex)))
+			logStart := massifs.PeakStackEnd(uint64(massifIndex), cmd.MassifFmt.MassifHeight)
 			fmt.Printf("%8d tree-start\n", logStart)
 			fmt.Printf("%8d massif\n", massifIndex)
 			if mmrIndex > 0 {
@@ -61,27 +65,24 @@ func NewDiagCmd() *cli.Command {
 			if cCtx.Bool("noread") {
 				return nil
 			}
-			if err = cfgMassifReader(cmd, cCtx); err != nil {
-				return err
-			}
 			tenant := cCtx.String("tenant")
 			if tenant == "" && !cCtx.IsSet("data-local") {
 				fmt.Println("a tenant is required to get diagnostics that require reading a blob")
 				return nil
 			}
-			cmd.massif, err = cmd.massifReader.GetMassif(context.Background(), tenant, massifIndex)
+			massif, err = massifs.GetMassifContext(ctx, reader, massifIndex)
 			if err != nil {
 				return err
 			}
-			fmt.Printf("%8d start:massif-height\n", cmd.massif.Start.MassifHeight)
-			fmt.Printf("%8d start:data-epoch\n", cmd.massif.Start.DataEpoch)
-			fmt.Printf("%8d start:commitment-epoch\n", cmd.massif.Start.CommitmentEpoch)
-			fmt.Printf("%8d start:first-index\n", cmd.massif.Start.FirstIndex)
-			fmt.Printf("%8d start:peak-stack-len\n", cmd.massif.Start.PeakStackLen)
+			fmt.Printf("%8d start:massif-height\n", massif.Start.MassifHeight)
+			fmt.Printf("%8d start:data-epoch\n", massif.Start.DataEpoch)
+			fmt.Printf("%8d start:commitment-epoch\n", massif.Start.CommitmentEpoch)
+			fmt.Printf("%8d start:first-index\n", massif.Start.FirstIndex)
+			fmt.Printf("%8d start:peak-stack-len\n", massif.Start.PeakStackLen)
 
-			fmt.Printf("%8d count\n", cmd.massif.Count())
-			fmt.Printf("%8d leaf-count\n", cmd.massif.MassifLeafCount())
-			fmt.Printf("%8d last-leaf-mmrindex\n", cmd.massif.LastLeafMMRIndex())
+			fmt.Printf("%8d count\n", massif.Count())
+			fmt.Printf("%8d leaf-count\n", massif.MassifLeafCount())
+			fmt.Printf("%8d last-leaf-mmrindex\n", massif.LastLeafMMRIndex())
 
 			// trieIndex is equivilent to leafIndex, but we use the term trieIndex
 			//  when dealing with trie data.
@@ -89,30 +90,30 @@ func NewDiagCmd() *cli.Command {
 			fmt.Printf("%8d trie-index\n", trieIndex)
 
 			// FirstIndex is the *size* of the mmr preceding the current massif
-			expectTrieIndexMassif := trieIndex - mmr.LeafCount(cmd.massif.Start.FirstIndex)
+			expectTrieIndexMassif := trieIndex - mmr.LeafCount(massif.Start.FirstIndex)
 			fmt.Printf("%8d trie-index - massif-first-index\n", expectTrieIndexMassif)
 
-			logTrieKey, err := cmd.massif.GetTrieKey(mmrIndex)
+			logTrieKey, err := massif.GetTrieKey(mmrIndex)
 			if err != nil {
 				return fmt.Errorf("when expecting %d for %d: %v", expectTrieIndexMassif, mmrIndex, err)
 			}
-			logTrieEntry, err := cmd.massif.GetTrieEntry(mmrIndex)
+			logTrieEntry, err := massif.GetTrieEntry(mmrIndex)
 			if err != nil {
 				entryIndex := mmr.LeafIndex(mmrIndex)
 				// FirstIndex is the *size* of the mmr preceding the current massif
-				expectTrieIndexMassif := entryIndex - mmr.LeafCount(cmd.massif.Start.FirstIndex)
+				expectTrieIndexMassif := entryIndex - mmr.LeafCount(massif.Start.FirstIndex)
 				return fmt.Errorf("when expecting %d for %d: %v", expectTrieIndexMassif, mmrIndex, err)
 			}
 
-			logNodeValue, err := cmd.massif.Get(mmrIndex)
+			logNodeValue, err := massif.Get(mmrIndex)
 			if err != nil {
 				return err
 			}
 			fmt.Printf("%x log-value\n", logNodeValue)
 
-			idBytes := logTrieKey[massifs.TrieEntryIdTimestampStart:massifs.TrieEntryIdTimestampEnd]
+			idBytes := logTrieKey[massifs.TrieEntryIDTimestampStart:massifs.TrieEntryIDTimestampEnd]
 			id := binary.BigEndian.Uint64(idBytes)
-			unixMS, err := snowflakeid.IDUnixMilli(id, uint8(cmd.massif.Start.CommitmentEpoch))
+			unixMS, err := snowflakeid.IDUnixMilli(id, uint8(massif.Start.CommitmentEpoch))
 			if err != nil {
 				return err
 			}

@@ -7,24 +7,13 @@ import (
 	"strings"
 
 	"github.com/datatrails/go-datatrails-common/logger"
-	"github.com/datatrails/go-datatrails-logverification/integrationsupport"
-	"github.com/datatrails/go-datatrails-merklelog/massifs"
 	"github.com/datatrails/go-datatrails-merklelog/mmr"
-	"github.com/datatrails/go-datatrails-merklelog/mmrtesting"
-	"github.com/datatrails/go-datatrails-simplehash/simplehash"
 	"github.com/datatrails/veracity"
+	"github.com/datatrails/veracity/tests/testcontext"
+	"github.com/forestrie/go-merklelog-datatrails/datatrails"
+	"github.com/robinbryce/go-merklelog-provider-testing/mmrtesting"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
-
-func (s *NodeSuite) newMMRTestingConfig(labelPrefix, tenantIdentity string) mmrtesting.TestConfig {
-	return mmrtesting.TestConfig{
-		StartTimeMS: (1698342521) * 1000, EventRate: 500,
-		TestLabelPrefix: labelPrefix,
-		TenantIdentity:  tenantIdentity,
-		Container:       strings.ReplaceAll(strings.ToLower(labelPrefix), "_", ""),
-	}
-}
 
 // TestNodeMultiMassif tests that the veracity sub command node
 // works for massifs beyond the first one and covers some obvious edge cases.
@@ -33,9 +22,6 @@ func (s *NodeSuite) newMMRTestingConfig(labelPrefix, tenantIdentity string) mmrt
 func (s *NodeSuite) TestVerifyIncludedMultiMassif() {
 	logger.New("TestNodeMultiMassif")
 	defer logger.OnExit()
-
-	cfg := s.newMMRTestingConfig("TestNodeMultiMassif", "")
-	azurite := mmrtesting.NewTestContext(s.T(), cfg)
 
 	massifHeight := uint8(8)
 	leavesPerMassif := mmr.HeightIndexLeafCount(uint64(massifHeight) - 1)
@@ -67,20 +53,14 @@ func (s *NodeSuite) TestVerifyIncludedMultiMassif() {
 		massifCount := tt.massifCount
 		s.Run(fmt.Sprintf("massifCount:%d", massifCount), func() {
 
-			leafHasher := integrationsupport.NewLeafHasher()
-			g := integrationsupport.NewTestGenerator(
-				s.T(), cfg.StartTimeMS/1000, &leafHasher, mmrtesting.TestGeneratorConfig{
-					StartTimeMS:     cfg.StartTimeMS,
-					EventRate:       cfg.EventRate,
-					TenantIdentity:  cfg.TenantIdentity,
-					TestLabelPrefix: cfg.TestLabelPrefix,
-				})
-
-			tenantId0 := g.NewTenantIdentity()
-			events := integrationsupport.GenerateTenantLog(
-				&azurite, g, int(tt.massifCount)*int(leavesPerMassif), tenantId0, true,
+			tc, logID, _, generated := testcontext.CreateLogBuilderContext(
+				s.T(),
 				massifHeight,
+				tt.massifCount,
+				mmrtesting.WithTestLabelPrefix("TestNodeMultiMassif"),
 			)
+
+			tenantID := datatrails.Log2TenantID(logID)
 
 			for _, iLeaf := range tt.leaves {
 
@@ -91,9 +71,9 @@ func (s *NodeSuite) TestVerifyIncludedMultiMassif() {
 				err := app.Run([]string{
 					"veracity",
 					"--envauth", // uses the emulator
-					"--container", cfg.Container,
+					"--container", tc.Cfg.Container,
 					"--data-url", s.Env.AzuriteVerifiableDataURL,
-					"--tenant", tenantId0,
+					"--tenant", tenantID,
 					"--height", fmt.Sprintf("%d", massifHeight),
 					"node",
 					"--mmrindex", fmt.Sprintf("%d", mmrIndex),
@@ -102,18 +82,7 @@ func (s *NodeSuite) TestVerifyIncludedMultiMassif() {
 
 				stdout := s.CaptureAndCloseStdout()
 
-				id, _, err := massifs.SplitIDTimestampHex(events[iLeaf].MerklelogEntry.Commit.Idtimestamp)
-				require.NoError(s.T(), err)
-
-				hasher := simplehash.NewHasherV3()
-				// hash the generated event
-				err = hasher.HashEvent(
-					events[iLeaf],
-					simplehash.WithPrefix([]byte{byte(integrationsupport.LeafTypePlain)}),
-					simplehash.WithIDCommitted(id),
-				)
-				require.Nil(s.T(), err)
-				leafValue := fmt.Sprintf("%x", hasher.Sum(nil))
+				leafValue := fmt.Sprintf("%x", generated.Args[iLeaf].Value)
 				assert.Equal(s.T(), leafValue, strings.TrimSpace(stdout))
 			}
 		})

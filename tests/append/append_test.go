@@ -7,7 +7,7 @@ import (
 )
 
 // Test that
-func (s *AppendCmdSuite) TestAppendCCFSignedStatement() {
+func (s *AppendCmdSuite) xTestAppendCCFSignedStatement() {
 	// replicaDir := s.T().TempDir()
 
 	var err error

@@ -1,0 +1,24 @@
+{
+  "keys": [
+    {
+      "kid": "merkle-log-signing/14346aafe4f04fa3b3c9388102f402cb",
+      "kty": "EC",
+      "key_ops": [
+        "verify"
+      ],
+      "crv": "P-384",
+      "x": "A861WiJFuwOruvgCHmoGCEoNy4rxQU-TMV0TIIFE84sA5106vKerlKVHiYEE04wh",
+      "y": "nDwgJoczIAMusJAym7l0_4WMetVqldGsZ-WDlwOgTBrz4CFAjQABe5P6dzawS2By"
+    },
+    {
+      "kid": "merkle-log-signing/16e61f876efd4c0cbab950422c445c07",
+      "kty": "EC",
+      "key_ops": [
+        "verify"
+      ],
+      "crv": "P-384",
+      "x": "oXb_EZGhA7yQcXL40MowMkSUka_DB9oL14A0MAsEOxqcM2SPnPuAl1UGmHoDWJhw",
+      "y": "of7_fp_tNmxiEQPFuYNAAbYIO42LtJ07uXsXHZDSs2MhfnpesAiBR13GOWve4mZR"
+    }
+  ]
+}

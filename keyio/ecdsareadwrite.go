@@ -6,11 +6,10 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"math/big"
 	"os"
 
-	commoncose "github.com/datatrails/go-datatrails-common/cose"
 	"github.com/fxamacker/cbor/v2"
+	"github.com/veraison/go-cose"
 )
 
 const (
@@ -22,68 +21,98 @@ const (
 	ECDSAPublicDefaultPerm         = 0644 // Default permission for private key file
 )
 
-func ReadECDSAPublicCose(
+func ReadECDSAPublicCOSE(
 	fileName string,
-	expectedStandardCurve ...string,
-) (*ecdsa.PublicKey, error) {
+) (DecodedPublic, error) {
 	// Read the public key from the default file
 	data, err := os.ReadFile(fileName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read public key file: %w", err)
+		return DecodedPublic{}, fmt.Errorf("failed to read public key file: %w", err)
 	}
 
-	publicKey, err := decodeECDSAPublicKey(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode public key: %w", err)
+	var m map[int64]interface{}
+	if err := cbor.Unmarshal(data, &m); err != nil {
+		return DecodedPublic{}, err
 	}
 
-	if len(expectedStandardCurve) > 0 &&
-		publicKey.Params().Name != expectedStandardCurve[0] {
-		return nil, fmt.Errorf("expected ECDSA public key with curve %s, got %s",
-			expectedStandardCurve[0], publicKey.Curve.Params().Name)
-	}
-
-	return publicKey, nil
+	return COSEDecodeEC2Public(m)
 }
 
-func ReadECDSAPrivateCose(
+func ReadECDSAPrivateCOSE(
 	fileName string,
 	expectedStandardCurve ...string,
-) (*ecdsa.PrivateKey, error) {
+) (DecodedPrivate, error) {
 	// Read the private key from the default file
 	data, err := os.ReadFile(fileName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read private key file: %w", err)
+		return DecodedPrivate{}, fmt.Errorf("failed to read private key file: %w", err)
 	}
-	privateKey, err := decodeECDSAPrivateKey(data, expectedStandardCurve...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode private key: %w", err)
+	var m map[int64]interface{}
+	if err := cbor.Unmarshal(data, &m); err != nil {
+		return DecodedPrivate{}, err
 	}
-	if len(expectedStandardCurve) > 0 &&
-		privateKey.PublicKey.Params().Name != expectedStandardCurve[0] {
-		return nil, fmt.Errorf("expected ECDSA private key with curve %s, got %s",
-			expectedStandardCurve[0], privateKey.PublicKey.Curve.Params().Name)
-	}
-	return privateKey, nil
+
+	return COSEDecodeEC2Private(m)
 }
 
-func ReadECDSAPrivatePEM(filePath string) (*ecdsa.PrivateKey, error) {
+func ReadECDSAPrivatePEM(filePath string) (DecodedPrivate, error) {
 	pemData, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, err
+		return DecodedPrivate{}, err
 	}
 
 	block, _ := pem.Decode(pemData)
 	if block == nil || block.Type != "EC PRIVATE KEY" {
-		return nil, errors.New("invalid PEM block or type")
+		return DecodedPrivate{}, errors.New("invalid PEM block or type")
 	}
 
 	key, err := x509.ParseECPrivateKey(block.Bytes)
 	if err != nil {
-		return nil, err
+		return DecodedPrivate{}, err
 	}
 
-	return key, nil
+	coseKey, err := cose.NewKeyFromPrivate(key)
+	if err != nil {
+		return DecodedPrivate{}, err
+	}
+	decoded := DecodedPrivate{
+		Private: key,
+		Alg:     coseKey.Algorithm,
+	}
+
+	return decoded, nil
+}
+
+func ReadECDSAPublicPEM(filePath string) (DecodedPublic, error) {
+	pemData, err := os.ReadFile(filePath)
+	if err != nil {
+		return DecodedPublic{}, err
+	}
+
+	block, _ := pem.Decode(pemData)
+	if block == nil || block.Type != "PUBLIC KEY" {
+		return DecodedPublic{}, errors.New("invalid PEM block or type")
+	}
+
+	key, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return DecodedPublic{}, err
+	}
+
+	ecdsaKey, ok := key.(*ecdsa.PublicKey)
+	if !ok {
+		return DecodedPublic{}, errors.New("not an ECDSA public key")
+	}
+	coseKey, err := cose.NewKeyFromPublic(ecdsaKey)
+	if err != nil {
+		return DecodedPublic{}, err
+	}
+	decoded := DecodedPublic{
+		Public: ecdsaKey,
+		Alg:    coseKey.Algorithm,
+	}
+
+	return decoded, nil
 }
 
 // Serializes the key to PEM format
@@ -135,12 +164,12 @@ func WriteECDSAPrivateCOSE(
 // Encode private key to COSE_Key format (as CBOR bytes)
 func encodePrivateKeyToCOSE(key *ecdsa.PrivateKey) ([]byte, error) {
 	m := map[int64]interface{}{
-		commoncose.KeyTypeLabel:   int64(commoncose.KeyTypeEC2),
-		commoncose.AlgorithmLabel: -7, // ES256 (ECDSA w/ SHA-256)
-		commoncose.ECCurveLabel:   1,  // P-256
-		commoncose.ECXLabel:       key.PublicKey.X.Bytes(),
-		commoncose.ECYLabel:       key.PublicKey.Y.Bytes(),
-		commoncose.ECDLabel:       key.D.Bytes(),
+		int64(1):              int64(cose.KeyTypeEC2),
+		int64(3):              cose.AlgorithmPS256,
+		cose.KeyLabelEC2Curve: cose.CurveP256, // P-256
+		cose.KeyLabelEC2X:     key.PublicKey.X.Bytes(),
+		cose.KeyLabelEC2Y:     key.PublicKey.Y.Bytes(),
+		cose.KeyLabelEC2D:     key.D.Bytes(),
 	}
 	return cbor.Marshal(m)
 }
@@ -148,75 +177,13 @@ func encodePrivateKeyToCOSE(key *ecdsa.PrivateKey) ([]byte, error) {
 // Encode public key to COSE_Key format (as CBOR bytes)
 func encodePublicKeyToCOSE(key *ecdsa.PublicKey) ([]byte, error) {
 	m := map[int64]interface{}{
-		commoncose.KeyTypeLabel:   int64(commoncose.KeyTypeEC2),
-		commoncose.AlgorithmLabel: -7, // ES256 (ECDSA w/ SHA-256)
-		commoncose.ECCurveLabel:   1,  // P-256
-		commoncose.ECXLabel:       key.X.Bytes(),
-		commoncose.ECYLabel:       key.Y.Bytes(),
+		int64(1):              int64(cose.KeyTypeEC2),
+		int64(3):              cose.AlgorithmPS256,
+		cose.KeyLabelEC2Curve: cose.CurveP256, // P-256
+		cose.KeyLabelEC2X:     key.X.Bytes(),
+		cose.KeyLabelEC2Y:     key.Y.Bytes(),
 	}
 	return cbor.Marshal(m)
-}
-
-func decodeECDSAPrivateKey(
-	data []byte,
-	expectedStandardCurve ...string,
-) (*ecdsa.PrivateKey, error) {
-	var m map[int64]interface{}
-	if err := cbor.Unmarshal(data, &m); err != nil {
-		return nil, err
-	}
-	publicKey, err := decodeECDSAPublicKeyFromMap(m, expectedStandardCurve...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode public key from map: %w", err)
-	}
-
-	d := big.NewInt(0)
-	d.SetBytes(m[commoncose.ECDLabel].([]byte))
-
-	privateKey := &ecdsa.PrivateKey{
-		PublicKey: *publicKey,
-		D:         d,
-	}
-	return privateKey, nil
-}
-
-func decodeECDSAPublicKey(
-	data []byte,
-	expectedStandardCurve ...string,
-) (*ecdsa.PublicKey, error) {
-	var m map[int64]interface{}
-	if err := cbor.Unmarshal(data, &m); err != nil {
-		return nil, err
-	}
-	return decodeECDSAPublicKeyFromMap(m, expectedStandardCurve...)
-}
-
-func decodeECDSAPublicKeyFromMap(
-	m map[int64]interface{},
-	expectedStandardCurve ...string,
-) (*ecdsa.PublicKey, error) {
-	ecKey, err := commoncose.NewECCoseKey(m)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get public key from COSE key: %w", err)
-	}
-
-	genericKey, err := ecKey.PublicKey()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get public key from COSE key: %w", err)
-	}
-
-	publicKey, ok := genericKey.(*ecdsa.PublicKey)
-	if !ok {
-		return nil, fmt.Errorf("expected ECDSA public key, got %T", genericKey)
-	}
-
-	if len(expectedStandardCurve) > 0 &&
-		publicKey.Params().Name != expectedStandardCurve[0] {
-		return nil, fmt.Errorf("expected ECDSA public key with curve %s, got %s",
-			expectedStandardCurve[0], publicKey.Curve.Params().Name)
-	}
-
-	return publicKey, nil
 }
 
 func WriteCoseECDSAPrivateKey(

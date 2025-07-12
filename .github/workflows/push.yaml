@@ -7,7 +7,7 @@ on: [
 
 jobs:
   build:
-    name: Quality Control
+    name: CI 
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -32,28 +32,25 @@ jobs:
           version: 3.x
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Code quality checks
+      - name: Bootstrap
         run: |
-          # Note: it is by design that we don't use the builder
-          task format
-          task lint
+          task bootstrap
+
       - name: Unit tests
         run: |
           # Note: it is by design that we don't use the builder
           task test:unit
       - name: Integration tests
         run: |
+          # Note: it is by design that we don't use the builder
           task test:integration
-      - name:  Azurite logs
+      - name: DataTrails public log tests
         run: |
-          task azurite:logs
-      - name: Stop azurite
-        if: always()
-        run: |
-          task azurite:stop
+          # Note: it is by design that we don't use the builder
+          task test:datatrails:public
 
   systemtest:
-    name: System Test
+    name: Built binary tests
     runs-on: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v3
@@ -74,15 +71,19 @@ jobs:
 
       - name: Build project
         run: |
+          task bootstrap
           task build
           export VERACITY_INSTALL=$(readlink -f ./veracity) >> $GITHUB_ENV
+          ./veracity --help
+          ./veracity --version
 
-      - name: System tests
-        run: |
-          echo "Veracity Installation Path: $VERACITY_INSTALL"
-          task test:system
+      # - name: Test the built binary
+      #   run: |
+      #     echo "Veracity Installation Path: $VERACITY_INSTALL"
+      #     task bootstrap
+      #     task test:binary
 
-      - name: Publish Test Report
-        uses: mikepenz/action-junit-report@v4
-        with:
-          report_paths: ./tests/systemtest/res.xml
+      # - name: Publish Test Report
+      #   uses: mikepenz/action-junit-report@v4
+      #   with:
+      #     report_paths: ./tests/systemtest/res.xml

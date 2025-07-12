@@ -5,18 +5,15 @@ package veracity
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"time"
 
-	"github.com/datatrails/go-datatrails-common/azblob"
 	"github.com/datatrails/go-datatrails-common/logger"
-	"github.com/datatrails/go-datatrails-merklelog/massifs"
-	"github.com/datatrails/go-datatrails-merklelog/massifs/snowflakeid"
-	"github.com/datatrails/go-datatrails-merklelog/massifs/watcher"
+	"github.com/datatrails/go-datatrails-merklelog/massifs/storage"
+	azwatcher "github.com/robinbryce/go-merklelog-azure/watcher"
 
 	// "github.com/datatrails/go-datatrails-common/azblob"
 	"github.com/urfave/cli/v2"
@@ -49,11 +46,7 @@ var (
 )
 
 type WatchConfig struct {
-	watcher.WatchConfig
-	WatchTenants map[string]bool
-	WatchCount   int
-	ReaderURL    string
-	Latest       bool
+	azwatcher.WatchConfig
 }
 
 // watchReporter abstracts the output interface for WatchForChanges to facilitate unit testing.
@@ -88,7 +81,7 @@ func NewLogWatcherCmd() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  flagLatest,
-				Usage: `find the latest changes for each requested tenant (no matter how long ago they occured). This is mutualy exclusive with --since, --idsince and --horizon.`,
+				Usage: `find the latest changes for each requested tenant (no matter how long ago they occurred). This is mutually exclusive with --since, --idsince and --horizon.`,
 				Value: false,
 			},
 
@@ -127,21 +120,40 @@ func NewLogWatcherCmd() *cli.Command {
 			if err = cfgLogging(cmd, cCtx); err != nil {
 				return err
 			}
-			reporter := &defaultReporter{log: cmd.log}
+			reporter := &defaultReporter{log: cmd.Log}
 
 			cfg, err := NewWatchConfig(cCtx, cmd)
 			if err != nil {
 				return err
 			}
 
-			forceProdUrl := cCtx.String("data-url") == ""
+			dataUrl := cCtx.String("data-url")
+			if dataUrl == "" && !IsStorageEmulatorEnabled(cCtx) {
+				dataUrl = DefaultRemoteMassifURL
+			}
 
-			reader, err := cfgReader(cmd, cCtx, forceProdUrl)
+
+			reader, err := cfgReader(cmd, cCtx, dataUrl)
 			if err != nil {
 				return err
 			}
 
-			return WatchForChanges(ctx, cfg, reader, reporter)
+			collator := azwatcher.NewLogTailCollator(
+				func(storagePath string) storage.LogID {
+					return storage.ParsePrefixedLogID("tenant/", storagePath)
+				},
+				storage.ObjectIndexFromPath,
+			)
+			watcher, err := azwatcher.NewWatcher(cfg.WatchConfig)
+			if err != nil {
+				return err
+			}
+			wc := &WatcherCollator{
+				Watcher:         watcher,
+				LogTailCollator: collator,
+			}
+
+			return azwatcher.WatchForChanges(ctx, cfg.WatchConfig, wc, reader, reporter)
 		},
 	}
 }
@@ -155,7 +167,7 @@ func checkCompatibleFlags(cCtx cliContext) error {
 
 	for _, excluded := range latestExcludes {
 		if cCtx.IsSet(excluded) {
-			return fmt.Errorf("the %s flag is mutualy exclusive with %s", flagLatest, strings.Join(latestExcludes, ", "))
+			return fmt.Errorf("the %s flag is mutually exclusive with %s", flagLatest, strings.Join(latestExcludes, ", "))
 		}
 	}
 	return nil
@@ -212,9 +224,14 @@ func NewWatchConfig(cCtx cliContext, cmd *CmdCtx) (WatchConfig, error) {
 	}
 
 	cfg := WatchConfig{
-		Latest: cCtx.Bool(flagLatest),
+		WatchConfig: azwatcher.WatchConfig{
+			Latest:   cCtx.Bool(flagLatest),
+			Interval: cCtx.Duration(flagInterval),
+		},
 	}
-	cfg.Interval = cCtx.Duration(flagInterval)
+	if cfg.Interval == 0 {
+		cfg.Interval = threeSeconds
+	}
 
 	if cCtx.IsSet(flagHorizon) {
 		cfg.Horizon, err = parseHorizon(cCtx.String(flagHorizon))
@@ -230,229 +247,31 @@ func NewWatchConfig(cCtx cliContext, cmd *CmdCtx) (WatchConfig, error) {
 		cfg.IDSince = cCtx.String(flagIDSince)
 	}
 
-	if !cCtx.IsSet(flagLatest) {
-		err = watcher.ConfigDefaults(&cfg.WatchConfig)
-		if err != nil {
-			return WatchConfig{}, err
-		}
-		if cfg.Interval < time.Second {
-			return WatchConfig{}, fmt.Errorf("polling more than once per second is not currently supported")
-		}
+	err = azwatcher.ConfigDefaults(&cfg.WatchConfig)
+	if err != nil {
+		return WatchConfig{}, err
+	}
+	if cfg.Interval < time.Second {
+		return WatchConfig{}, fmt.Errorf("polling more than once per second is not currently supported")
 	}
 
 	cfg.WatchCount = min(max(1, cCtx.Int(flagCount)), maxPollCount)
 
-	cfg.ReaderURL = cmd.readerURL
+	cfg.ObjectPrefixURL = cmd.RemoteURL
 
-	tenants := CtxGetTenantOptions(cCtx)
-	if len(tenants) == 0 {
+	logs := CtxGetLogOptions(cCtx)
+	if len(logs) == 0 {
 		return cfg, nil
 	}
 
-	cfg.WatchTenants = make(map[string]bool)
-	for _, t := range tenants {
-		cfg.WatchTenants[strings.TrimPrefix(t, tenantPrefix)] = true
+	cfg.WatchLogs = make(map[string]bool)
+	for _, lid := range logs {
+		cfg.WatchLogs[string(lid)] = true
 	}
 	return cfg, nil
 }
 
-type Watcher struct {
-	watcher.Watcher
-	cfg      WatchConfig
-	reader   azblob.Reader
-	reporter watchReporter
-	collator watcher.LogTailCollator
-}
-
-// FirstFilter accounts for the --latest flag but otherwise falls through to the base implementation
-func (w *Watcher) FirstFilter() string {
-	if !w.cfg.Latest {
-		return w.Watcher.FirstFilter()
-	}
-	// The first idtimestamp of the first epoch
-	idSince := massifs.IDTimestampToHex(0, 0)
-	return fmt.Sprintf(`"lastid">='%s'`, idSince)
-}
-
-// NextFilter accounts for the --latest flag but otherwise falls through to the base implementation
-func (w *Watcher) NextFilter() string {
-	if !w.cfg.Latest {
-		return w.Watcher.NextFilter()
-	}
-	return w.FirstFilter()
-}
-
-func normalizeTenantIdentity(tenant string) string {
-	if strings.HasPrefix(tenant, tenantPrefix) {
-		return tenant
-	}
-	return fmt.Sprintf("%s%s", tenantPrefix, tenant)
-}
-
-// WatchForChanges watches for tenant log chances according to the provided config
-func WatchForChanges(
-	ctx context.Context,
-	cfg WatchConfig, reader azblob.Reader, reporter watchReporter,
-) error {
-
-	w := &Watcher{
-		Watcher:  watcher.Watcher{Cfg: cfg.WatchConfig},
-		cfg:      cfg,
-		reader:   reader,
-		reporter: reporter,
-		collator: watcher.NewLogTailCollator(),
-	}
-	tagsFilter := w.FirstFilter()
-
-	count := w.cfg.WatchCount
-
-	for {
-
-		// For each count, collate all the pages
-		err := collectPages(ctx, w, tagsFilter)
-		if err != nil {
-			return err
-		}
-
-		var activity []TenantActivity
-		for _, tenant := range w.collator.SortedMassifTenants() {
-			if w.cfg.WatchTenants != nil && !w.cfg.WatchTenants[tenant] {
-				continue
-			}
-
-			lt := w.collator.Massifs[tenant]
-			sealLastID := lastSealID(w.collator, tenant)
-			// This is console mode output
-
-			a := TenantActivity{
-				Tenant:      normalizeTenantIdentity(tenant),
-				Massif:      int(lt.Number),
-				IDCommitted: lt.LastID, IDConfirmed: sealLastID,
-				LastModified: lastActivityRFC3339(lt.LastID, sealLastID),
-				MassifURL:    fmt.Sprintf("%s%s", w.cfg.ReaderURL, lt.Path),
-			}
-
-			if sealLastID != sealIDNotFound {
-				a.SealURL = fmt.Sprintf("%s%s", w.cfg.ReaderURL, w.collator.Seals[tenant].Path)
-			}
-
-			activity = append(activity, a)
-		}
-
-		if activity != nil {
-			reporter.Logf(
-				"%d active logs since %v (%s).",
-				len(w.collator.Massifs),
-				w.LastSince.Format(time.RFC3339),
-				w.LastIDSince,
-			)
-			reporter.Logf(
-				"%d tenants sealed since %v (%s).",
-				len(w.collator.Seals),
-				w.LastSince.Format(time.RFC3339),
-				w.LastIDSince,
-			)
-
-			marshaledJson, err := json.MarshalIndent(activity, "", "  ")
-			if err != nil {
-				return err
-			}
-			reporter.Outf(string(marshaledJson))
-
-			// Terminate immediately once we have results
-			return nil
-		}
-
-		// Note we don't allow a zero interval
-		if count <= 1 || w.Cfg.Interval == 0 {
-
-			// exit non zero if nothing is found
-			return ErrNoChanges
-		}
-		count--
-
-		tagsFilter = w.NextFilter()
-		time.Sleep(w.Cfg.Interval)
-	}
-}
-
-// collectPages collects all pages of a single filterList invocation
-// and keeps things happy left
-func collectPages(
-	ctx context.Context,
-	w *Watcher,
-	tagsFilter string,
-	filterOpts ...azblob.Option,
-) error {
-
-	var lastMarker azblob.ListMarker
-
-	for {
-		filtered, err := filteredList(ctx, w.reader, tagsFilter, lastMarker, filterOpts...)
-		if err != nil {
-			return err
-		}
-
-		err = w.collator.CollatePage(filtered.Items)
-		if err != nil {
-			return err
-		}
-		lastMarker = filtered.Marker
-		if lastMarker == nil || *lastMarker == "" {
-			break
-		}
-	}
-	return nil
-}
-
-// filteredList makes adding the lastMarker option to the FilteredList call 'happy to the left'
-func filteredList(
-	ctx context.Context,
-	reader azblob.Reader,
-	tagsFilter string,
-	marker azblob.ListMarker,
-	filterOpts ...azblob.Option,
-) (*azblob.FilterResponse, error) {
-
-	if marker == nil || *marker == "" {
-		return reader.FilteredList(ctx, tagsFilter)
-	}
-	return reader.FilteredList(ctx, tagsFilter, append(filterOpts, azblob.WithListMarker(marker))...)
-}
-
-func lastSealID(c watcher.LogTailCollator, tenant string) string {
-	if _, ok := c.Seals[tenant]; ok {
-		return c.Seals[tenant].LastID
-	}
-	return sealIDNotFound
-}
-
-func lastActivityRFC3339(idmassif, idseal string) string {
-	tmassif, err := lastActivity(idmassif)
-	if err != nil {
-		return ""
-	}
-	if idseal == sealIDNotFound {
-		return tmassif.UTC().Format(time.RFC3339)
-	}
-	tseal, err := lastActivity(idseal)
-	if err != nil {
-		return tmassif.UTC().Format(time.RFC3339)
-	}
-	if tmassif.After(tseal) {
-		return tmassif.UTC().Format(time.RFC3339)
-	}
-	return tseal.UTC().Format(time.RFC3339)
-}
-
-func lastActivity(idTimstamp string) (time.Time, error) {
-	id, epoch, err := massifs.SplitIDTimestampHex(idTimstamp)
-	if err != nil {
-		return time.Time{}, err
-	}
-	ms, err := snowflakeid.IDUnixMilli(id, epoch)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return time.UnixMilli(ms), nil
+type WatcherCollator struct {
+	azwatcher.Watcher
+	azwatcher.LogTailCollator
 }

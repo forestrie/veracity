@@ -1,6 +1,7 @@
 package veracity
 
 const (
+	DefaultMassifHeight = uint8(14)
 	// LeafTypePlain is used for committing to plain values.
 	LeafTypePlain         = uint8(0)
 	PublicAssetsPrefix    = "publicassets/"

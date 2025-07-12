@@ -4,130 +4,65 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/datatrails/go-datatrails-common/logger"
 	"github.com/datatrails/go-datatrails-merklelog/massifs"
-	"github.com/datatrails/veracity/localmassifs"
+	"github.com/forestrie/go-merklelog-datatrails/datatrails"
 	"github.com/urfave/cli/v2"
 )
 
-const (
-	defaultMassifHeight = uint8(14)
-)
-
-// cfgMassifReader establishes the blob read only data accessor
-// only azure blob storage is supported. Both emulated and produciton.
-func cfgMassifReader(cmd *CmdCtx, cCtx *cli.Context) error {
-
-	var err error
-	if cmd.log == nil {
-		if err = cfgLogging(cmd, cCtx); err != nil {
-			return err
-		}
-	}
-
-	cmd.massifHeight = uint8(cCtx.Uint("height"))
-	if cmd.massifHeight == 0 {
-		cmd.massifHeight = defaultMassifHeight
-	}
-
-	localLog := cCtx.String("data-local")
-	remoteLog := cCtx.String("data-url")
-
-	if localLog != "" && remoteLog != "" {
-		return fmt.Errorf("can't use data-local and data-url at the same time")
-	}
-
-	if localLog == "" && remoteLog == "" {
-		// If we had no url and no local data supplied we default to the production data source.
-		reader, err := cfgReader(cmd, cCtx, true)
-		if err != nil {
-			return err
-		}
-		mr := massifs.NewMassifReader(logger.Sugar, reader)
-		cmd.massifReader = &mr
-
-	} else if localLog != "" {
-
-		codec, err := massifs.NewRootSignerCodec()
-		if err != nil {
-			return err
-		}
-
-		// This configures the dir cache and local reader for single tenant use,
-		// InReplicaMode is false, meaning tenant specific filesystem paths are
-		// not automatically derived.
-		cache, err := massifs.NewLogDirCache(
-			logger.Sugar,
-			localmassifs.NewFileOpener(),
-			massifs.WithDirCacheTenant(cCtx.String("tenant")),
-			// massifs.WithExplicitFilePaths(cCtx.String("tenant")), // may be empty string
-			massifs.WithDirCacheMassifLister(localmassifs.NewDirLister()),
-			massifs.WithDirCacheSealLister(localmassifs.NewDirLister()),
-			massifs.WithReaderOption(massifs.WithMassifHeight(cmd.massifHeight)),
-			massifs.WithReaderOption(massifs.WithCBORCodec(codec)),
-		)
-		if err != nil {
-			return err
-		}
-
-		mr, err := massifs.NewLocalReader(logger.Sugar, cache)
-		if err != nil {
-			return err
-		}
-		cmd.massifReader = &mr
-
-	} else {
-		// otherwise configure for reading from remote blobs
-		reader, err := cfgReader(cmd, cCtx, false)
-		if err != nil {
-			return err
-		}
-		mr := massifs.NewMassifReader(logger.Sugar, reader)
-		cmd.massifReader = &mr
-	}
-
-	return nil
-}
-
 // cfgMassif configures a massif reader and reads a massif
-func cfgMassif(cmd *CmdCtx, cCtx *cli.Context) error {
+func cfgMassif(ctx context.Context, cmd *CmdCtx, cCtx *cli.Context) (*massifs.MassifContext, error) {
+
+	var massif massifs.MassifContext
+	var reader readerSelector
 	var err error
 
-	if err = cfgMassifReader(cmd, cCtx); err != nil {
-		return err
+	if reader, err = cfgMassifReader(cmd, cCtx); err != nil {
+		return nil, err
 	}
 
 	tenant := CtxGetOneTenantOption(cCtx)
 	if tenant == "" {
-		return fmt.Errorf("tenant must be provided for this command")
+		return nil, fmt.Errorf("tenant must be provided for this command")
 	}
 
-	ctx := context.Background()
+	logID := datatrails.TenantID2LogID(tenant)
+	if logID == nil {
+		return nil, fmt.Errorf("invalid tenant id '%s'", tenant)
+	}
+	
+	if err = reader.SelectLog(ctx, logID); err != nil {
+		return nil, err
+	}
 
 	mmrIndex := cCtx.Uint64("mmrindex")
-	massifIndex := cCtx.Uint64("massif")
+	massifIndex := uint32(cCtx.Uint64("massif"))
 
 	// mmrIndex zero is always going to be massifIndex 0 so we treat this the
 	// same as though the massif option had been supplied as 0
-	if massifIndex == uint64(0) && mmrIndex == uint64(0) {
-		cmd.massif, err = cmd.massifReader.GetMassif(context.Background(), tenant, massifIndex)
-		return err
+	if massifIndex == uint32(0) && mmrIndex == uint64(0) {
+		massif, err = massifs.GetMassifContext(ctx, reader, massifIndex)
+		if err != nil {
+			return nil, err
+		}
+		return &massif, nil
 	}
 
 	// now, if we have a non zero mmrIndex, use it to (re)compute the massifIndex
 	if mmrIndex > uint64(0) {
-		massifIndex = massifs.MassifIndexFromMMRIndex(cmd.massifHeight, mmrIndex)
+		massifIndex = uint32(massifs.MassifIndexFromMMRIndex(cmd.MassifFmt.MassifHeight, mmrIndex))
 
-		cmd.massif, err = cmd.massifReader.GetMassif(context.Background(), tenant, massifIndex)
-		return err
+		massif, err = massifs.GetMassifContext(ctx, reader, massifIndex)
+		if err != nil {
+			return nil, err
+		}
+		return &massif, nil
 	}
 
 	// If massifIndex is not provided it will be zero here, and that is a good
 	// default.
-	massif, err := cmd.massifReader.GetMassif(ctx, tenant, massifIndex)
+	massif, err = massifs.GetMassifContext(ctx, reader, massifIndex)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	cmd.massif = massif
-	return nil
+	return &massif, nil
 }

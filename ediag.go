@@ -11,9 +11,11 @@ import (
 
 	"github.com/datatrails/go-datatrails-merklelog/massifs"
 	"github.com/datatrails/go-datatrails-merklelog/massifs/snowflakeid"
+	"github.com/datatrails/go-datatrails-merklelog/massifs/storage"
 	"github.com/datatrails/go-datatrails-merklelog/mmr"
 	"github.com/datatrails/go-datatrails-simplehash/simplehash"
-	veracityapp "github.com/datatrails/veracity/app"
+	appdata "github.com/forestrie/go-merklelog-datatrails/appdata"
+	"github.com/forestrie/go-merklelog-datatrails/datatrails"
 	"github.com/urfave/cli/v2"
 )
 
@@ -32,20 +34,29 @@ func NewEventDiagCmd() *cli.Command {
 		},
 		Action: func(cCtx *cli.Context) error {
 
+			var reader readerSelector
+			var massif massifs.MassifContext
+
 			tenantIdentity := cCtx.String("tenant")
 
-			appData, err := veracityapp.ReadAppData(cCtx.Args().Len() == 0, cCtx.Args().Get(0))
+			appData, err := appdata.ReadAppData(cCtx.Args().Len() == 0, cCtx.Args().Get(0))
 			if err != nil {
 				return err
 			}
 
-			appEntries, err := veracityapp.AppDataToVerifiableLogEntries(appData, tenantIdentity)
+			appEntries, err := appdata.AppDataToVerifiableLogEntries(appData, tenantIdentity)
 			if err != nil {
 				return err
 			}
 
 			cmd := &CmdCtx{}
-			if err = cfgMassifReader(cmd, cCtx); err != nil {
+
+			if err = cfgMassifFmt(cmd, cCtx); err != nil {
+				return err
+			}
+
+			reader, err = newReaderSelector(cmd, cCtx)
+			if err != nil {
 				return err
 			}
 			cmpPrint := func(fmtEq, fmtNe string, a, b any) bool {
@@ -66,27 +77,30 @@ func NewEventDiagCmd() *cli.Command {
 				// Get the mmrIndex from the request and then compute the massif
 				// it implies based on the massifHeight command line option.
 				mmrIndex := appEntry.MMRIndex()
-				massifIndex := massifs.MassifIndexFromMMRIndex(cmd.massifHeight, mmrIndex)
-				tenantIdentity := cCtx.String("tenant")
-				if tenantIdentity == "" {
+				massifIndex := uint32(massifs.MassifIndexFromMMRIndex(cmd.MassifFmt.MassifHeight, mmrIndex))
+				var logID storage.LogID
+				if cCtx.String("tenant") != "" {
+					tenantIdentity := cCtx.String("tenant")
+					logID = datatrails.TenantID2LogID(tenantIdentity)
+				}
+				if logID == nil {
+
 					// The tenant identity on the event is the original tenant
 					// that created the event. For public assets and shared
 					// assets, this is true regardless of which tenancy the
 					// record is fetched from.  Those same events will appear in
 					// the logs of all tenants they were shared with.
-					tenantIdentity, err = appEntry.LogTenant()
-					if err != nil {
-						return err
-					}
+					logID = appEntry.LogID()
 				}
+				reader.SelectLog(cCtx.Context, logID)
 				// read the massif blob
-				cmd.massif, err = cmd.massifReader.GetMassif(context.Background(), tenantIdentity, massifIndex)
+				massif, err = massifs.GetMassifContext(context.Background(), reader, massifIndex)
 				if err != nil {
 					return err
 				}
 
 				// Get the human time from the idtimestamp committed on the event.
-				idTimestamp, err := appEntry.IDTimestamp(&cmd.massif)
+				idTimestamp, err := appEntry.IDTimestamp(&massif)
 				if err != nil {
 					return err
 				}
@@ -99,7 +113,7 @@ func NewEventDiagCmd() *cli.Command {
 				if err != nil {
 					return err
 				}
-				eventIDTimestampMS, err := snowflakeid.IDUnixMilli(eventIDTimestamp, uint8(cmd.massif.Start.CommitmentEpoch))
+				eventIDTimestampMS, err := snowflakeid.IDUnixMilli(eventIDTimestamp, uint8(massif.Start.CommitmentEpoch))
 				if err != nil {
 					return err
 				}
@@ -108,24 +122,24 @@ func NewEventDiagCmd() *cli.Command {
 				// Note that the banner info is all from the event response
 				fmt.Printf("%d %s %s\n", leafIndex, time.UnixMilli(eventIDTimestampMS).Format(time.RFC3339Nano), appEntry.AppID())
 
-				leafIndexMassif, err := cmd.massif.GetMassifLeafIndex(leafIndex)
+				leafIndexMassif, err := massif.GetMassifLeafIndex(leafIndex)
 				if err != nil {
 					return fmt.Errorf("when expecting %d for %d: %v", leafIndexMassif, mmrIndex, err)
 				}
 				fmt.Printf(" |%8d leaf-index-massif\n", leafIndexMassif)
 
 				// Read the trie entry from the log
-				logTrieEntry := massifs.GetTrieEntry(cmd.massif.Data, cmd.massif.IndexStart(), leafIndexMassif)
-				logNodeValue, err := cmd.massif.Get(mmrIndex)
+				logTrieEntry := massifs.GetTrieEntry(massif.Data, massif.IndexStart(), leafIndexMassif)
+				logNodeValue, err := massif.Get(mmrIndex)
 				if err != nil {
 					return err
 				}
 
-				logTrieKey := massifs.GetTrieKey(cmd.massif.Data, cmd.massif.IndexStart(), leafIndexMassif)
+				logTrieKey := massifs.GetTrieKey(massif.Data, massif.IndexStart(), leafIndexMassif)
 
-				logTrieIDTimestampBytes := logTrieEntry[massifs.TrieEntryIdTimestampStart:massifs.TrieEntryIdTimestampEnd]
+				logTrieIDTimestampBytes := logTrieEntry[massifs.TrieEntryIDTimestampStart:massifs.TrieEntryIDTimestampEnd]
 				logTrieIDTimestamp := binary.BigEndian.Uint64(logTrieIDTimestampBytes)
-				unixMS, err := snowflakeid.IDUnixMilli(logTrieIDTimestamp, uint8(cmd.massif.Start.CommitmentEpoch))
+				unixMS, err := snowflakeid.IDUnixMilli(logTrieIDTimestamp, uint8(massif.Start.CommitmentEpoch))
 				if err != nil {
 					return err
 				}
@@ -189,13 +203,13 @@ func NewEventDiagCmd() *cli.Command {
 				// Generate the proof for the mmrIndex and get the root. We use
 				// the mmrSize from the end of the blob in which the leaf entry
 				// was recorded. Any size > than the leaf index would work.
-				mmrSize := cmd.massif.RangeCount()
-				proof, err := mmr.InclusionProof(&cmd.massif, mmrSize, mmrIndex)
+				mmrSize := massif.RangeCount()
+				proof, err := mmr.InclusionProof(&massif, mmrSize, mmrIndex)
 				if err != nil {
 					return err
 				}
 
-				verified, err := mmr.VerifyInclusion(&cmd.massif, eventHasher, mmrSize, logNodeValue, mmrIndex, proof)
+				verified, err := mmr.VerifyInclusion(&massif, eventHasher, mmrSize, logNodeValue, mmrIndex, proof)
 				if verified {
 					fmt.Printf("OK|%d %d\n", mmrIndex, leafIndex)
 					continue

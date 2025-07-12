@@ -20,9 +20,9 @@ import (
 
 	commoncose "github.com/datatrails/go-datatrails-common/cose"
 	"github.com/datatrails/go-datatrails-merklelog/massifs"
+	"github.com/datatrails/go-datatrails-merklelog/massifs/storage"
 	"github.com/datatrails/go-datatrails-merklelog/mmr"
 	"github.com/datatrails/veracity/keyio"
-	"github.com/datatrails/veracity/localmassifs"
 	"github.com/datatrails/veracity/scitt"
 	"github.com/urfave/cli/v2"
 )
@@ -119,6 +119,7 @@ func NewAppendCmd() *cli.Command {
 		},
 		Action: func(cCtx *cli.Context) error {
 			var err error
+			var reader readerSelector
 			cmd := &CmdCtx{}
 
 			if !cCtx.IsSet("data-local") {
@@ -128,15 +129,8 @@ func NewAppendCmd() *cli.Command {
 			if err != nil {
 				return fmt.Errorf("failed to configure logging: %w", err)
 			}
-			err = cfgIDState(cmd, cCtx)
-			if err != nil {
-				return fmt.Errorf("failed to configure id state: %w", err)
-			}
-			if cmd.cborCodec, err = massifs.NewRootSignerCodec(); err != nil {
-				return err
-			}
 
-			if err = cfgMassifReader(cmd, cCtx); err != nil {
+			if reader, err = cfgMassifReader(cmd, cCtx); err != nil {
 				return err
 			}
 
@@ -144,15 +138,17 @@ func NewAppendCmd() *cli.Command {
 			// Read or generate a key to seal the forked log
 			//
 			var sealingKey *ecdsa.PrivateKey
+			var decodedKey keyio.DecodedPrivate
 			if cCtx.IsSet("sealer-key") && !cCtx.Bool("generate-sealer-key") {
 				sealerKeyFile := cCtx.String("sealer-key")
 				if sealerKeyFile == "" {
 					return errors.New("sealer-key file is required")
 				}
-				sealingKey, err = keyio.ReadECDSAPrivateCose(sealerKeyFile, "P-256")
+				decodedKey, err = keyio.ReadECDSAPrivateCOSE(sealerKeyFile)
 				if err != nil {
 					return fmt.Errorf("failed to load sealer key from file %s: %w", sealerKeyFile, err)
 				}
+				sealingKey = decodedKey.Private
 			}
 			if cCtx.IsSet("sealer-key-pem") && !cCtx.Bool("generate-sealer-key") {
 				if cCtx.IsSet("sealer-key") {
@@ -162,10 +158,11 @@ func NewAppendCmd() *cli.Command {
 				if sealerKeyFile == "" {
 					return errors.New("sealer-key file is required")
 				}
-				sealingKey, err = keyio.ReadECDSAPrivatePEM(sealerKeyFile)
+				decodedKey, err = keyio.ReadECDSAPrivatePEM(sealerKeyFile)
 				if err != nil {
 					return fmt.Errorf("failed to load sealer key from file %s: %w", sealerKeyFile, err)
 				}
+				sealingKey = decodedKey.Private
 			}
 
 			if cCtx.Bool("generate-sealer-key") {
@@ -174,29 +171,33 @@ func NewAppendCmd() *cli.Command {
 					return err
 				}
 			}
+			var verifier cose.Verifier
 
-			//
-			// Read the head of a locally replicated production datatrails ledger
-			//
-			readerCfg, err := localmassifs.NewReaderDefaultConfig(
-				cmd.log,
-				cCtx.String("massifs-dir"),
-				cCtx.String("seals-dir"),
-			)
-			if err != nil {
-				return fmt.Errorf("failed to create massif reader config: %w", err)
+			if cmd.CheckpointPublic.Public == nil {
+				return errors.New("checkpoint public key is required")
 			}
-			verified, err := localmassifs.ReadVerifiedHeadMassif(readerCfg)
+			verifier, err = cose.NewVerifier(cmd.CheckpointPublic.Alg, cmd.CheckpointPublic.Public)
+			if err != nil {
+				return err
+			}
+
+			headIndex, err := reader.HeadIndex(context.Background(), storage.ObjectCheckpoint)
+			if err != nil {
+				return fmt.Errorf("failed to get head index: %w", err)
+			}
+
+			verified, err := massifs.GetContextVerified(
+				context.Background(), reader, &cmd.CBORCodec, verifier, headIndex)
 			if err != nil {
 				return fmt.Errorf("failed to read verified head massif: %w", err)
 			}
 
 			mmrSizeOrig := verified.RangeCount()
 			fmt.Printf("%8d verified-size\n", mmrSizeOrig)
-			verified.Tags = map[string]string{}
+			// verified.Tags = map[string]string{}
 
 			//
-			// Add a batch of statements, including the in-toto from ammoury
+			// Add a batch of statements
 			//
 			statements, err := addStatements(cmd, cCtx, &verified.MassifContext)
 			if err != nil {
@@ -230,7 +231,7 @@ func NewAppendCmd() *cli.Command {
 			// Seal  a checkpoint for the locally forked ledger with a made up sealing key
 			// Receipts are rooted at a checkpoint accumulator state.
 			//
-			rootSigner := massifs.NewRootSigner("https://github.com/robinbryce/veracity", cmd.cborCodec)
+			rootSigner := massifs.NewRootSigner("https://github.com/robinbryce/veracity", cmd.CBORCodec)
 
 			// TODO: account for filling a massif
 			mmrSizeCurrent := verified.RangeCount()
@@ -252,7 +253,7 @@ func NewAppendCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			lastIDTimestamp := verified.GetLastIdTimestamp()
+			lastIDTimestamp := verified.GetLastIDTimestamp()
 
 			state := massifs.MMRState{
 				Version:         int(massifs.MMRStateVersionCurrent),
@@ -294,7 +295,7 @@ func NewAppendCmd() *cli.Command {
 			}
 
 			// note that state is not verified here, but we just signed it so it is our droid
-			msg, state, err := massifs.DecodeSignedRoot(cmd.cborCodec, data)
+			msg, state, err := massifs.DecodeSignedRoot(cmd.CBORCodec, data)
 			if err != nil {
 				return err
 			}

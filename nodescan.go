@@ -2,6 +2,7 @@ package veracity
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 
@@ -24,10 +25,11 @@ func NewNodeScanCmd() *cli.Command {
 			&cli.BoolFlag{Name: "massif-relative", Aliases: []string{"r"}},
 		},
 		Action: func(cCtx *cli.Context) error {
-			var err error
 			cmd := &CmdCtx{}
 
-			if err = cfgMassif(cmd, cCtx); err != nil {
+			var err error
+			var massif *massifs.MassifContext
+			if massif, err = cfgMassif(context.Background(), cmd, cCtx); err != nil {
 				return err
 			}
 
@@ -35,12 +37,12 @@ func NewNodeScanCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			start := cmd.massif.LogStart()
-			count := cmd.massif.Count()
+			start := massif.LogStart()
+			count := massif.Count()
 			for i := range count {
-				entry := cmd.massif.Data[start+i*massifs.ValueBytes : start+i*massifs.ValueBytes+massifs.ValueBytes]
+				entry := massif.Data[start+i*massifs.ValueBytes : start+i*massifs.ValueBytes+massifs.ValueBytes]
 				if bytes.Equal(entry, targetValue) {
-					fmt.Printf("%d\n", i+cmd.massif.Start.FirstIndex)
+					fmt.Printf("%d\n", i+massif.Start.FirstIndex)
 					return nil
 				}
 			}

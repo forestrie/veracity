@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/datatrails/go-datatrails-logverification/logverification/app"
 	"github.com/datatrails/go-datatrails-merklelog/massifs"
 	"github.com/datatrails/go-datatrails-merklelog/mmr"
+	"github.com/forestrie/go-merklelog-datatrails/appentry"
+	"github.com/forestrie/go-merklelog-datatrails/datatrails"
 	"github.com/urfave/cli/v2"
 
-	veracityapp "github.com/datatrails/veracity/app"
+	appdata "github.com/forestrie/go-merklelog-datatrails/appdata"
 )
 
 var (
@@ -34,7 +35,8 @@ func proofPath(proof [][]byte) string {
 
 // verifyEvent is an example function of how to verify the inclusion of a datatrails event using the mmr and massifs modules
 func verifyEvent(
-	event *app.AppEntry, logTenant string, mmrEntry []byte, massifHeight uint8, massifGetter MassifGetter,
+	reader massifs.ObjectReader,
+	event *appentry.AppEntry, logTenant string, mmrEntry []byte, massifHeight uint8,
 ) ([][]byte, error) {
 
 	// Get the mmrIndex from the request and then compute the massif
@@ -44,7 +46,7 @@ func verifyEvent(
 	massifIndex := massifs.MassifIndexFromMMRIndex(massifHeight, mmrIndex)
 
 	// read the massif blob
-	massif, err := massifGetter.GetMassif(context.Background(), logTenant, massifIndex)
+	massif, err := massifs.GetMassifContext(context.Background(), reader, uint32(massifIndex))
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +99,7 @@ Note: for publicly attested events, or shared protected events, you must use --t
 			}
 
 			log := func(m string, args ...any) {
-				cmd.log.Infof(m, args...)
+				cmd.Log.Infof(m, args...)
 			}
 
 			tenantIdentity := cCtx.String("tenant")
@@ -117,24 +119,29 @@ Note: for publicly attested events, or shared protected events, you must use --t
 				tenantLogPath = tenantIdentity
 			}
 
-			appData, err := veracityapp.ReadAppData(cCtx.Args().Len() == 0, cCtx.Args().Get(0))
+			if err = cfgMassifFmt(cmd, cCtx); err != nil {
+				return err
+			}
+
+			appData, err := appdata.ReadAppData(cCtx.Args().Len() == 0, cCtx.Args().Get(0))
 			if err != nil {
 				return err
 			}
 
-			verifiableLogEntries, err := veracityapp.AppDataToVerifiableLogEntries(appData, tenantIdentity)
+			verifiableLogEntries, err := appdata.AppDataToVerifiableLogEntries(appData, tenantIdentity)
 			if err != nil {
 				return err
 			}
 
-			if err = cfgMassifReader(cmd, cCtx); err != nil {
+			reader, err := newMassifReader(cmd, cCtx)
+			if err != nil {
 				return err
 			}
 
 			var countNotCommitted int
 			var countVerifyFailed int
 
-			previousMassifIndex := uint64(0)
+			previousMassifIndex := uint32(0)
 			var massifContext *massifs.MassifContext = nil
 
 			for _, event := range verifiableLogEntries {
@@ -142,7 +149,7 @@ Note: for publicly attested events, or shared protected events, you must use --t
 				leafIndex := mmr.LeafIndex(event.MMRIndex())
 
 				// get the massif index for the event event
-				massifIndex := massifs.MassifIndexFromMMRIndex(cmd.massifHeight, event.MMRIndex())
+				massifIndex := uint32(massifs.MassifIndexFromMMRIndex(cmd.MassifFmt.MassifHeight, event.MMRIndex()))
 
 				// find the log tenant path if not provided
 				if tenantLogPath == "" {
@@ -152,14 +159,19 @@ Note: for publicly attested events, or shared protected events, you must use --t
 					if err != nil {
 						return err
 					}
+				}
 
+				logId := datatrails.TenantID2LogID(tenantLogPath)
+
+				if err := reader.SelectLog(cCtx.Context, logId); err != nil {
+					return fmt.Errorf("failed to select log %s: %w", tenantLogPath, err)
 				}
 
 				// check if we need this event is part of a different massif than the previous event
 				//
 				// if it is, we get the new massif
 				if massifContext == nil || massifIndex != previousMassifIndex {
-					massif, err := cmd.massifReader.GetMassif(cCtx.Context, tenantLogPath, massifIndex)
+					massif, err := massifs.GetMassifContext(context.Background(), reader, massifIndex)
 					if err != nil {
 						return err
 					}

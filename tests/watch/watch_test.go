@@ -76,7 +76,7 @@ func (s *WatchCmdSuite) TestNoChangesForFictitiousTenant() {
 		"--tenant", s.Env.UnknownTenantId,
 		"watch", "--latest",
 	})
-	assert.Equal(err, veracity.ErrNoChanges)
+	assert.Equal(veracity.ErrNoChanges, err)
 }
 
 // Test that the watch command returns no error when the horizon is set longer than the age of the company
