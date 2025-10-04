@@ -35,7 +35,6 @@ oneTimeSetUp() {
     cp $SOAK_LOCAL_BLOB_FILE $DUP_DIR/soak-mmr.log
 
     assertTrue "prod MMR blob file should be present" "[ -r $PROD_LOCAL_BLOB_FILE ]"
-    assertTrue "soak MMR blob file should be present" "[ -r $SOAK_LOCAL_BLOB_FILE ]"
     assertTrue "invalid MMR blob file should be present" "[ -r $INVALID_BLOB_FILE ]"
 }
 

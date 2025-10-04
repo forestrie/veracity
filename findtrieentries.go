@@ -10,6 +10,7 @@ import (
 
 	"github.com/datatrails/go-datatrails-common/logger"
 	"github.com/datatrails/go-datatrails-merklelog/massifs"
+	"github.com/datatrails/go-datatrails-merklelog/massifs/storage"
 	"github.com/datatrails/go-datatrails-merklelog/mmr"
 	"github.com/google/uuid"
 	"github.com/urfave/cli/v2"
@@ -69,8 +70,9 @@ func logIDToLogTenant(logID string) (string, error) {
 // findTrieKeys searchs the log of the given log tenant for matches to the given triekeys
 // and returns the leaf indexes (trie indexes) of all the matches as well as the number of trie entries considered
 func findTrieKeys(
+	ctx context.Context,
 	log logger.Logger,
-	massifReader MassifReader,
+	massifReader readerSelector,
 	tenantLogPath string,
 	massifStartIndex int64,
 	massifEndIndex int64,
@@ -96,15 +98,10 @@ func findTrieKeys(
 			break
 		}
 
-		massifContext, err := massifReader.GetMassif(context.Background(), tenantLogPath, uint64(massifIndex))
+		massifContext, err := massifs.GetMassifContext(ctx, massifReader, uint32(massifIndex))
 
 		// check if we have reached the last massif
-		if errors.Is(err, massifs.ErrMassifNotFound) {
-			break
-		}
-
-		// check if we have reached the last massif for local log
-		if errors.Is(err, massifs.ErrLogFileMassifNotFound) {
+		if errors.Is(err, storage.ErrDoesNotExist) {
 			break
 		}
 
@@ -210,6 +207,9 @@ func NewFindTrieEntriesCmd() *cli.Command {
 		Action: func(cCtx *cli.Context) error {
 			cmd := &CmdCtx{}
 
+			var err error
+			var reader readerSelector
+
 			// This command uses the structured logger for all optional output.
 			if err := cfgLogging(cmd, cCtx); err != nil {
 				return err
@@ -258,7 +258,7 @@ func NewFindTrieEntriesCmd() *cli.Command {
 				return err
 			}
 
-			if err := cfgMassifReader(cmd, cCtx); err != nil {
+			if reader, err = cfgMassifReader(cmd, cCtx); err != nil {
 				return err
 			}
 
@@ -279,15 +279,18 @@ func NewFindTrieEntriesCmd() *cli.Command {
 					[]byte(appID),
 				)
 
-				cmd.log.Debugf("trieKey: %x", trieKey)
+				cmd.Log.Debugf("trieKey: %x", trieKey)
+
+				reader.SelectLog(context.Background(), logIDBytes)
 
 				leafIndexMatches, entriesConsidered, err = findTrieKeys(
-					cmd.log,
-					cmd.massifReader,
+					context.Background(),
+					cmd.Log,
+					reader,
 					tenantLogPath,
 					massifStartIndex,
 					massifEndIndex,
-					cmd.massifHeight,
+					cmd.MassifFmt.MassifHeight,
 					trieKey,
 				)
 				if err != nil {
@@ -308,7 +311,7 @@ func NewFindTrieEntriesCmd() *cli.Command {
 					[]byte(appID),
 				)
 
-				cmd.log.Debugf("trieKey version 0: %x", trieKeyVersion0)
+				cmd.Log.Debugf("trieKey version 0: %x", trieKeyVersion0)
 
 				logTenantUUIDStr := strings.TrimPrefix(logTenant, "tenant/")
 				logTenantUUID, err := uuid.Parse(logTenantUUIDStr)
@@ -332,15 +335,18 @@ func NewFindTrieEntriesCmd() *cli.Command {
 					[]byte(appID),
 				)
 
-				cmd.log.Debugf("trieKey version 1: %x", trieKeyVersion1)
+				reader.SelectLog(context.Background(), logIDVersion1)
+
+				cmd.Log.Debugf("trieKey version 1: %x", trieKeyVersion1)
 
 				leafIndexMatches, entriesConsidered, err = findTrieKeys(
-					cmd.log,
-					cmd.massifReader,
+					context.Background(),
+					cmd.Log,
+					reader,
 					tenantLogPath,
 					massifStartIndex,
 					massifEndIndex,
-					cmd.massifHeight,
+					cmd.MassifFmt.MassifHeight,
 					trieKeyVersion0,
 					trieKeyVersion1,
 				)
@@ -350,7 +356,7 @@ func NewFindTrieEntriesCmd() *cli.Command {
 
 			}
 
-			cmd.log.Debugf("entries considered: %v", entriesConsidered)
+			cmd.Log.Debugf("entries considered: %v", entriesConsidered)
 
 			// if we want the leaf index matches log them and return
 			if asLeafIndexes {

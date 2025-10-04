@@ -2,23 +2,22 @@ package veracity
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/datatrails/go-datatrails-common/cbor"
-	"github.com/datatrails/go-datatrails-common/cose"
 	"github.com/datatrails/go-datatrails-common/logger"
 	"github.com/datatrails/go-datatrails-merklelog/massifs"
+	"github.com/datatrails/go-datatrails-merklelog/massifs/storage"
 	"github.com/datatrails/go-datatrails-merklelog/massifs/watcher"
-	"github.com/datatrails/go-datatrails-merklelog/mmr"
 	"github.com/gosuri/uiprogress"
+	azblobs "github.com/robinbryce/go-merklelog-azure/blobs"
+	azwatcher "github.com/robinbryce/go-merklelog-azure/watcher"
 	"github.com/urfave/cli/v2"
+	"github.com/veraison/go-cose"
 	"golang.org/x/exp/rand"
 )
 
@@ -51,23 +50,6 @@ var (
 	ErrInconsistentUseOfPrefetchedSeal = errors.New("prefetching signed root reader used inconsistently")
 )
 
-// prefetchingSealReader pre-fetches the seal for the massif to avoid racing with the
-// sealer.  If the massif is read first, the log can grow and a a new seal can
-// be applied to the *longer* log. At which point the previously read copy of
-// the massif will be "to short" for the seal.
-// See Bug#10530
-type prefetchingSealReader struct {
-	msg            *cose.CoseSign1Message
-	state          massifs.MMRState
-	tenantIdentity string
-	massifIndex    uint32
-}
-
-type changeCollector struct {
-	log         logger.Logger
-	watchOutput string
-}
-
 // NewReplicateLogsCmd updates a local replica of a remote log, verifying the mutual consistency of the two before making any changes.
 //
 //nolint:gocognit
@@ -97,12 +79,16 @@ in the publicly accessible remote storage`,
 				Value:   ".",
 			},
 			&cli.StringFlag{
-				Name: "sealer-key",
-				Usage: `to ensure  the remote seal is signed by the correct
-key, set this to the public datatrails sealing key,
-having obtained its value from a source you trust`,
+				Name:    "checkpoint-public",
+				Usage:   `A COSE Key format file, containing the key to use to verify checkpoint signatures, ES2 only.`,
 				Aliases: []string{"pub"},
 			},
+			&cli.StringFlag{
+				Name:    "checkpoint-jwks",
+				Usage:   `A JWKS format file, whose *last* entry is the key to use to verify checkpoint signatures. ES only`,
+				Aliases: []string{"jwks"},
+			},
+
 			&cli.StringFlag{
 				Name: "changes",
 				Usage: `
@@ -141,15 +127,24 @@ By default transient errors are re-tried without limit, and if the error is 429,
 		Action: func(cCtx *cli.Context) error {
 			cmd := &CmdCtx{}
 
-			// note: we don't use cfgMassifReader here because it does not
-			// support setting replicaDir for the local reader, and infact we
-			// need to configure both a local and a remote reader.
-
 			var err error
 			// The loggin configuration is safe to share accross go routines.
 			if err = cfgLogging(cmd, cCtx); err != nil {
 				return err
 			}
+
+			if err = CfgKeys(cmd, cCtx); err != nil {
+				return err
+			}
+
+			dataUrl := cCtx.String("data-url")
+			if dataUrl == "" && !IsStorageEmulatorEnabled(cCtx) {
+				dataUrl = DefaultRemoteMassifURL
+			}
+			if dataUrl == "" {
+				return fmt.Errorf("%w: remote-url is required", ErrRequiredOption)
+			}
+			cmd.RemoteURL = dataUrl
 
 			// There isn't really a better context. We could implement user
 			// defined timeouts for "lights out/ci" use cases in future. Humans can ctrl-c
@@ -178,14 +173,13 @@ By default transient errors are re-tried without limit, and if the error is 429,
 
 // replicateChanges replicate the changes for the provided slice of tenants.
 // Paralelism is limited by breaking the total changes into smaller slices and calling this function
-func replicateChanges(cCtx *cli.Context, cmd *CmdCtx, changes []TenantMassif, progress Progresser) error {
-
+func replicateChanges(cCtx *cli.Context, cmd *CmdCtx, changes []watcher.LogMassif, progress Progresser) error {
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(changes)) // buffered so it doesn't block
 
 	for _, change := range changes {
 		wg.Add(1)
-		go func(change TenantMassif, errChan chan<- error) {
+		go func(change watcher.LogMassif, errChan chan<- error) {
 			defer wg.Done()
 			defer progress.Completed()
 
@@ -202,7 +196,7 @@ func replicateChanges(cCtx *cli.Context, cmd *CmdCtx, changes []TenantMassif, pr
 				// defined timeouts for "lights out/ci" use cases in future. Humans can ctrl-c
 				err = replicator.ReplicateVerifiedUpdates(
 					context.Background(),
-					change.Tenant, startMassif, endMassif,
+					startMassif, endMassif,
 				)
 				if err == nil {
 					return
@@ -210,7 +204,7 @@ func replicateChanges(cCtx *cli.Context, cmd *CmdCtx, changes []TenantMassif, pr
 
 				// 429 is the only transient error we currently re-try
 				var retryDelay time.Duration
-				retryDelay, ok := massifs.IsRateLimiting(err)
+				retryDelay, ok := azblobs.IsRateLimiting(err)
 				if !ok || retries == 0 {
 					// not transient
 					errChan <- err
@@ -220,10 +214,10 @@ func replicateChanges(cCtx *cli.Context, cmd *CmdCtx, changes []TenantMassif, pr
 					retryDelay = defaultRetryDelay(err)
 				}
 
-				// underflow will actually terminate the loop, but that would have been running for an infeasable amount of time
+				// underflow will actually terminate the loop, but that would have been running for an infeasible amount of time
 				retries--
 				// in the default case, remaining is always reported as -1
-				cmd.log.Infof("retrying in %s, remaining: %d", retryDelay, max(-1, retries))
+				cmd.Log.Infof("retrying in %s, remaining: %d", retryDelay, max(-1, retries))
 			}
 		}(change, errChan)
 	}
@@ -234,23 +228,22 @@ func replicateChanges(cCtx *cli.Context, cmd *CmdCtx, changes []TenantMassif, pr
 
 	var errs []error
 	for err := range errChan {
-		cmd.log.Infof("%v", err)
+		cmd.Log.Infof("%v", err)
 		errs = append(errs, err)
 	}
 	if len(errs) > 0 {
 		return errs[0]
 	}
 	if len(changes) == 1 {
-		cmd.log.Infof("replication complete for tenant %s", changes[0].Tenant)
+		cmd.Log.Infof("replication complete for log %x", changes[0].LogID)
 	} else {
-		cmd.log.Infof("replication complete for %d tenants", len(changes))
+		cmd.Log.Infof("replication complete for %d logs", len(changes))
 	}
 	return nil
 }
 
-func initReplication(cCtx *cli.Context, cmd *CmdCtx, change TenantMassif) (*VerifiedReplica, uint32, uint32, error) {
-
-	replicator, err := NewVerifiedReplica(cCtx, cmd.Clone())
+func initReplication(cCtx *cli.Context, cmd *CmdCtx, change watcher.LogMassif) (*VerifiedReplica, uint32, uint32, error) {
+	replicator, err := NewVerifiedReplica(cCtx, cmd.Clone(), change.LogID)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -268,361 +261,87 @@ func defaultRetryDelay(_ error) time.Duration {
 }
 
 func newProgressor(cCtx *cli.Context, barName string, increments int) Progresser {
-
 	if !cCtx.Bool("progress") {
 		return NewNoopProgress()
 	}
 	return NewStagedProgress(barName, increments)
 }
 
-type VerifiedContextReader interface {
-	massifs.VerifiedContextReader
-}
-
 type VerifiedReplica struct {
-	cCtx         *cli.Context
-	log          logger.Logger
-	writeOpener  massifs.WriteAppendOpener
-	localReader  massifs.ReplicaReader
-	remoteReader MassifReader
-	rootReader   massifs.SealGetter
-	cborCodec    cbor.CBORCodec
+	massifs.VerifyingReplicator
+	cCtx *cli.Context
+	log  logger.Logger
 }
 
 func NewVerifiedReplica(
-	cCtx *cli.Context, cmd *CmdCtx,
+	cCtx *cli.Context, cmd *CmdCtx, logID storage.LogID,
 ) (*VerifiedReplica, error) {
-
-	dataUrl := cCtx.String("data-url")
-	reader, err := cfgReader(cmd, cCtx, dataUrl == "")
-	if err != nil {
-		return nil, err
-	}
-	if err = cfgRootReader(cmd, cCtx); err != nil {
-		return nil, err
-	}
-
-	massifHeight := cCtx.Int64("height")
-	if massifHeight > massifHeightMax {
-		return nil, fmt.Errorf("massif height must be less than 256")
-	}
-
-	cache, err := massifs.NewLogDirCache(logger.Sugar, NewFileOpener())
-	if err != nil {
-		return nil, err
-	}
-	localReader, err := massifs.NewLocalReader(logger.Sugar, cache)
-	if err != nil {
-		return nil, err
-	}
-
-	opts := []massifs.DirCacheOption{
-		massifs.WithDirCacheReplicaDir(cCtx.String("replicadir")),
-		massifs.WithDirCacheMassifLister(NewDirLister()),
-		massifs.WithDirCacheSealLister(NewDirLister()),
-		massifs.WithReaderOption(massifs.WithMassifHeight(uint8(massifHeight))),
-		massifs.WithReaderOption(massifs.WithSealGetter(&localReader)),
-		massifs.WithReaderOption(massifs.WithCBORCodec(cmd.cborCodec)),
-	}
-
-	// This will require that the remote seal is signed by the key
-	// provided here. If it is not, even if the seal is valid, the
-	// verification will fail with a suitable error.
-	pemString := cCtx.String("sealer-key")
-	if pemString != "" {
-		pem, err := DecodeECDSAPublicString(pemString)
-		if err != nil {
-			return nil, err
-		}
-		opts = append(opts, massifs.WithReaderOption(massifs.WithTrustedSealerPub(pem)))
-	}
-
-	// For the localreader, the seal getter is the local reader itself.
-	// So we need to make use of ReplaceOptions on the cache, so we can
-	// provide the options after we have created the local reader.
-	cache.ReplaceOptions(opts...)
-
-	remoteReader := massifs.NewMassifReader(
-		logger.Sugar, reader,
-	)
-
-	return &VerifiedReplica{
-		cCtx:         cCtx,
-		log:          logger.Sugar,
-		writeOpener:  NewFileWriteOpener(),
-		localReader:  &localReader,
-		remoteReader: &remoteReader,
-		rootReader:   &cmd.rootReader,
-		cborCodec:    cmd.cborCodec,
-	}, nil
-}
-
-// ReplicateVerifiedUpdates confirms that any additions to the remote log are
-// consistent with the local replica Only the most recent local massif and seal
-// need be retained for verification purposes.  If independent, off line,
-// verification of inclusion is desired, retain as much of the log as is
-// interesting.
-func (v *VerifiedReplica) ReplicateVerifiedUpdates(
-	ctx context.Context,
-	tenantIdentity string, startMassif, endMassif uint32) error {
-
-	isNilOrNotFound := func(err error) bool {
-		if err == nil {
-			return true
-		}
-		if errors.Is(err, massifs.ErrLogFileSealNotFound) {
-			return true
-		}
-		if errors.Is(err, massifs.ErrLogFileMassifNotFound) {
-			return true
-		}
-		return false
-	}
-
-	// on demand promotion of a v0 state to a v1 state, for compatibility with the consistency check.
-	trustedBaseState := func(local *massifs.VerifiedContext) (massifs.MMRState, error) {
-
-		if local.MMRState.Version > int(massifs.MMRStateVersion0) {
-			return local.MMRState, nil
-		}
-
-		// At this point we have a local seal in v0 format and we expect the
-		// remote seal to be in v1 format.
-		// We need to promote the legacy base state to a V1 state for the
-		// consistency check.  This is a one way operation, and the legacy seal
-		// root is discarded.  Once the seal for the open massif is upgraded,
-		// this case will never be encountered again for that tenant.
-
-		peaks, err := mmr.PeakHashes(local, local.MMRState.MMRSize-1)
-		if err != nil {
-			return massifs.MMRState{}, err
-		}
-		root := mmr.HashPeaksRHS(sha256.New(), peaks)
-		if !bytes.Equal(root, local.MMRState.LegacySealRoot) {
-			return massifs.MMRState{}, fmt.Errorf("legacy seal root does not match the bagged peaks")
-		}
-		state := local.MMRState
-		state.Version = int(massifs.MMRStateVersion1)
-		// Keep the legacy seal root so that we can verify in the case where the remote is a V0 seal
-		// state.LegacySealRoot = nil
-		state.Peaks = peaks
-		return state, nil
-	}
-
-	if err := v.localReader.EnsureReplicaDirs(tenantIdentity); err != nil {
-		return err
-	}
-
-	// Read the most recently verified state from the local store. The
-	// verification ensures the local replica has not been corrupted, but this
-	// check trusts the seal stored locally with the head massif
-	local, err := v.localReader.GetHeadVerifiedContext(ctx, tenantIdentity)
-	if !isNilOrNotFound(err) {
-		return err
-	}
-
-	// We always verify up to the requested massif, but we do not re-verify
-	// massifs we have already verified and replicated localy. If the last
-	// locally replicated masif is ahead of the endMassif we do nothing here.
-	//
-	// The --ancestors option is used to ensure there is a minimum number of
-	// verified massifs replicated locally, and influnces the startMassif to
-	// acheive this.
-	//
-	// The startMassif is the greater of the requested start and the massif
-	// index of the last locally verified massif.  Our verification always reads
-	// the remote massifs starting from the startMassif.
-	//
-	// In the loop below we ensure three key things:
-	// 1. If there is a local replica of the remote, we ensure the remote is
-	//   consistent with the replica.
-	// 2. If the remote starts a new massif, and we locally have its
-	//    predecessor, we ensure the remote is consistent with the local predecessor.
-	// 3. If there is no local replica, we create one by copying the the remote.
-	//
-	// Note that we arrange things so that local is always the last avaible
-	// local massif, or nil.  When dealing with the remote corresponding to
-	// startMassif, the local is *either* the predecessor or is the incomplete
-	// local replica of the remote being considered. After the first remote is
-	// dealt with, local is always the predecessor.
-
-	if local != nil {
-
-		// Start from the next massif after the last verified massif and do not
-		// re-verify massifs we have already verified and replicated,
-		if startMassif > local.Start.MassifIndex+1 {
-			// if the start of the ancestors is more than one massif ahead of
-			// the local, then we start afresh.
-			local = nil
-		} else {
-			startMassif = local.Start.MassifIndex
-		}
-	}
-
-	for i := startMassif; i <= endMassif; i++ {
-
-		// Note: we have to fetch the seal before the massif, otherwise we can lose a rase with the builder
-		// See bug#10530
-		remoteSealReader, err := NewPrefetchingSealReader(ctx, v.rootReader, tenantIdentity, i)
-		if err != nil {
-			return err
-		}
-		remoteVerifyOpts := []massifs.ReaderOption{
-			massifs.WithCBORCodec(v.cborCodec),
-			massifs.WithSealGetter(remoteSealReader),
-		}
-		if local != nil {
-			var baseState massifs.MMRState
-			// Promote the trusted base state to a V1 state if it is a V0 state.
-			baseState, err = trustedBaseState(local)
-			if err != nil {
-				return err
-			}
-			remoteVerifyOpts = append(remoteVerifyOpts, massifs.WithTrustedBaseState(baseState))
-		}
-
-		// On the first iteration local is *either* the predecessor to
-		// startMassif or it is the, as yet, incomplete local replica of it.
-		// After the first iteration, local is always the predecessor. (If the
-		// remote is still incomplte it means there is no subseqent massif to
-		// read)
-		remote, err := v.remoteReader.GetVerifiedContext(
-			ctx, tenantIdentity, uint64(i), remoteVerifyOpts...)
-		if err != nil {
-			// both the remote massif and it's seal must be present for the
-			// verification to succeed, so we don't filter using isBlobNotFound
-			// here.
-			return err
-		}
-
-		// read the local massif, if it exists, reading at the end of the loop
-		local, err = v.localReader.GetVerifiedContext(ctx, tenantIdentity, uint64(i))
-		if !isNilOrNotFound(err) {
-			return err
-		}
-
-		// copy the remote locally, safely replacing the coresponding local if
-		// one exists. if the local is replaced (or created) without error, the
-		// remote verified context becomes the new local.
-		local, err = v.replicateVerifiedContext(local, remote)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// replicateVerifiedContext is used to replicate a remote massif which may be an
-// extension of a previously verified local copy.
-//
-// If local is nil, this method simply replicates the verified remote unconditionally.
-//
-// Otherwise, local and remote are required to be the same tenant and the same massif.
-// This method then deals with ensuring the remote is a consistent extension of
-// local before replacing the previously verified local.
-//
-// This method has no side effects in the case where the remote and the local
-// are verified to be identical, the original local instance is retained.
-func (v *VerifiedReplica) replicateVerifiedContext(
-	local *massifs.VerifiedContext, remote *massifs.VerifiedContext) (*massifs.VerifiedContext, error) {
-
-	if local == nil {
-		return nil, v.localReader.ReplaceVerifiedContext(remote, v.writeOpener)
-	}
-
-	// note: return a nil local for all error cases, the caller should not carry on
-	if local.TenantIdentity != remote.TenantIdentity {
-		return nil, fmt.Errorf("can't replace, tenant identies don't match: local %s vs remote %s", local.TenantIdentity, remote.TenantIdentity)
-	}
-
-	if local.Start.MassifIndex != remote.Start.MassifIndex {
-		return nil, fmt.Errorf(
-			"can't replace, massif indices don't match: local %d vs remote %d",
-			local.Start.MassifIndex, remote.Start.MassifIndex)
-	}
-
-	tenantIdentity := local.TenantIdentity
-	massifIndex := local.Start.MassifIndex
-
-	if len(local.Data) > len(remote.Data) {
-		// the remote log has been truncated since we last looked
-		return nil, fmt.Errorf("%w: %s, massif=%d", ErrRemoteLogTruncated, tenantIdentity, massifIndex)
-	}
-
-	// if the remote and local are the same, we are done, provided the roots still match
-	if len(local.Data) == len(remote.Data) {
-		// note: the length equal check is elevated so we only write to local
-		// disc if there are changes.  this duplicates a check in
-		// verifiedStateEqual in the interest of avoiding accidents due to
-		// future refactorings.
-		if !verifiedStateEqual(local, remote) {
-			return nil, fmt.Errorf("%w: %s, massif=%d", ErrRemoteLogInconsistentRootState, tenantIdentity, massifIndex)
-		}
-		return local, nil
-	}
-
-	err := v.localReader.ReplaceVerifiedContext(remote, v.writeOpener)
-	if err != nil {
-		return nil, err
-	}
-
-	// We have succesfully the local data with the data from the remote. The
-	// remote vc is now equivalent to the local
-	return remote, nil
-}
-
-func verifiedStateEqual(a *massifs.VerifiedContext, b *massifs.VerifiedContext) bool {
 
 	var err error
 
-	// There is no difference in the log format between the two versions currently supported.
-	if len(a.Data) != len(b.Data) {
-		return false
-	}
-	fromRoots := a.ConsistentRoots
-	toRoots := b.ConsistentRoots
-	// If either state is a V0 state, compare the legacy seal roots
-	if a.MMRState.Version == int(massifs.MMRStateVersion0) || b.MMRState.Version == int(massifs.MMRStateVersion0) {
-		rootA := peakBaggedRoot(a.MMRState)
-		rootB := peakBaggedRoot(b.MMRState)
-		if !bytes.Equal(rootA, rootB) {
-			return false
-		}
-		if a.MMRState.Version == int(massifs.MMRStateVersion0) {
-			fromRoots, err = mmr.PeakHashes(a, a.MMRState.MMRSize-1)
-			if err != nil {
-				return false
-			}
-		}
-		if b.MMRState.Version == int(massifs.MMRStateVersion0) {
-			toRoots, err = mmr.PeakHashes(b, b.MMRState.MMRSize-1)
-			if err != nil {
-				return false
-			}
-		}
-
+	if err := cfgMassifFmt(cmd, cCtx); err != nil {
+		return nil, err
 	}
 
-	// If both states are V1 states, compare the peaks
-	if len(fromRoots) != len(toRoots) {
-		return false
+	if cmd.MassifFmt.MassifHeight > massifHeightMax {
+		return nil, fmt.Errorf("massif height must be less than 256")
 	}
-	for i := range len(fromRoots) {
-		if !bytes.Equal(fromRoots[i], toRoots[i]) {
-			return false
+	if cmd.MassifFmt.MassifHeight == 0 {
+		return nil, fmt.Errorf("massif height must be initialized")
+	}
+
+	if cmd.RemoteURL == "" {
+		return nil, fmt.Errorf("%w: remote-url is required", ErrRequiredOption)
+	}
+
+	reader, err := cfgReader(cmd, cCtx, cmd.RemoteURL)
+	if err != nil {
+		return nil, err
+	}
+
+	dataUrl := cmd.RemoteURL // may be azurite in emulator mode, which overrides
+
+	remoteReader, err := NewCmdStorageProviderAzure(context.Background(), cCtx, cmd, dataUrl, reader)
+	if err != nil {
+		return nil, err
+	}
+	if err = remoteReader.SelectLog(context.Background(), logID); err != nil {
+		return nil, fmt.Errorf("failed to select remote log %s: %w", logID, err)
+	}
+	localReader, err := NewCmdStorageProviderFS(
+		context.Background(), cCtx, cmd, cCtx.String("replicadir"))
+	if err != nil {
+		return nil, err
+	}
+
+	if err = localReader.SelectLog(context.Background(), logID); err != nil {
+		return nil, fmt.Errorf("failed to select local log %s: %w", logID, err)
+	}
+
+	var verifier cose.Verifier
+
+	if cmd.CheckpointPublic.Public != nil {
+		verifier, err = cose.NewVerifier(cmd.CheckpointPublic.Alg, cmd.CheckpointPublic.Public)
+		if err != nil {
+			return nil, err
 		}
 	}
-	return true
+
+	return &VerifiedReplica{
+		cCtx: cCtx,
+		log:  logger.Sugar,
+		VerifyingReplicator: massifs.VerifyingReplicator{
+			CBORCodec:    cmd.CBORCodec,
+			COSEVerifier: verifier,
+			Sink:         localReader,
+			Source:       remoteReader,
+		},
+	}, nil
 }
 
-// peakBaggedRoot is used to obtain an MMRState V0 bagged root from a V1 accumulator peak list.
-// If a v0 state is provided, the root is returned as is.
-func peakBaggedRoot(state massifs.MMRState) []byte {
-	if state.Version < int(massifs.MMRStateVersion1) {
-		return state.LegacySealRoot
-	}
-	return mmr.HashPeaksRHS(sha256.New(), state.Peaks)
+type changeCollector struct {
+	log         logger.Logger
+	watchOutput string
 }
 
 func (c *changeCollector) Logf(msg string, args ...any) {
@@ -638,30 +357,31 @@ func (c *changeCollector) Outf(msg string, args ...any) {
 
 func newWatchConfig(cCtx *cli.Context, cmd *CmdCtx) (WatchConfig, error) {
 	cfg := WatchConfig{
-		WatchCount: 1,
-		WatchConfig: watcher.WatchConfig{
-			Horizon: tenYearsOfHours,
+		WatchConfig: azwatcher.WatchConfig{
+			// Latest:     cCtx.Bool("latest"),
+			WatchCount: 1,
+			Horizon:    tenYearsOfHours,
 		},
 	}
-	err := watcher.ConfigDefaults(&cfg.WatchConfig)
+	err := azwatcher.ConfigDefaults(&cfg.WatchConfig)
 	if err != nil {
 		return WatchConfig{}, err
 	}
-	cfg.ReaderURL = cmd.readerURL
+	cfg.ObjectPrefixURL = cmd.RemoteURL
 
-	tenants := CtxGetTenantOptions(cCtx)
-	if len(tenants) == 0 {
+	logids := CtxGetLogOptions(cCtx)
+	if len(logids) == 0 {
 		return cfg, nil
 	}
-	cfg.WatchTenants = make(map[string]bool)
-	for _, t := range tenants {
-		cfg.WatchTenants[strings.TrimPrefix(t, tenantPrefix)] = true
+
+	cfg.WatchLogs = make(map[string]bool)
+	for _, lid := range logids {
+		cfg.WatchLogs[string(lid)] = true
 	}
 	return cfg, nil
 }
 
-func readTenantMassifChanges(ctx context.Context, cCtx *cli.Context, cmd *CmdCtx) ([]TenantMassif, error) {
-
+func readTenantMassifChanges(ctx context.Context, cCtx *cli.Context, cmd *CmdCtx) ([]watcher.LogMassif, error) {
 	if cCtx.IsSet("latest") {
 		// This is because people get tripped up with the `veracity watch -z 90000h | veracity replicate-logs` idiom,
 		// Its such a common use case that we should just make it work.
@@ -669,61 +389,53 @@ func readTenantMassifChanges(ctx context.Context, cCtx *cli.Context, cmd *CmdCtx
 		if err != nil {
 			return nil, err
 		}
-		forceProdUrl := cCtx.String("data-url") == ""
 
-		reader, err := cfgReader(cmd, cCtx, forceProdUrl)
+		if cmd.RemoteURL == "" {
+			return nil, fmt.Errorf("%w: remote-url is required", ErrRequiredOption)
+		}
+
+		reader, err := cfgReader(cmd, cCtx, cmd.RemoteURL)
+		if err != nil {
+			return nil, err
+		}
+		collator := azwatcher.NewLogTailCollator(
+			func(storagePath string) storage.LogID {
+				return storage.ParsePrefixedLogID("tenant/", storagePath)
+			},
+			storage.ObjectIndexFromPath,
+		)
+		watcher, err := azwatcher.NewWatcher(cfg.WatchConfig)
+		if err != nil {
+			return nil, err
+		}
+		wc := &WatcherCollator{
+			Watcher:         watcher,
+			LogTailCollator: collator,
+		}
+
+		collector := &changeCollector{log: cmd.Log}
+		err = azwatcher.WatchForChanges(ctx, cfg.WatchConfig, wc, reader, collector)
 		if err != nil {
 			return nil, err
 		}
 
-		collector := &changeCollector{log: cmd.log}
-		err = WatchForChanges(ctx, cfg, reader, collector)
-		if err != nil {
-			return nil, err
-		}
-
-		return scannerToTenantMassifs(bufio.NewScanner(strings.NewReader(collector.watchOutput)))
+		return scannerToLogMassifs(bufio.NewScanner(strings.NewReader(collector.watchOutput)))
 	}
 
-	tenants := CtxGetTenantOptions(cCtx)
-	if len(tenants) == 1 {
-		return []TenantMassif{{Tenant: tenants[0], Massif: cCtx.Int("massif")}}, nil
+	logs := CtxGetLogOptions(cCtx)
+	if len(logs) == 1 {
+		return []watcher.LogMassif{{LogID: logs[0], Massif: cCtx.Int("massif")}}, nil
 	}
-	if len(tenants) > 1 {
-		return nil, fmt.Errorf("multiple tenants may only be used with --latest")
+	if len(logs) > 1 {
+		return nil, fmt.Errorf("multiple logs may only be used with --latest")
 	}
 
-	// If --changes is set the tenants and massif indices are read from the identified file
+	// If --changes is set the logs and massif indices are read from the identified file
 	changesFile := cCtx.String("changes")
 	if changesFile != "" {
-		return filePathToTenantMassifs(changesFile)
+		return filePathToLogMassifs(changesFile)
 	}
 
 	// No explicit config and --all not set, read from stdin
-	return stdinToDecodedTenantMassifs()
-}
-
-func NewPrefetchingSealReader(ctx context.Context, sealGetter massifs.SealGetter, tenantIdentity string, massifIndex uint32) (*prefetchingSealReader, error) {
-
-	msg, state, err := sealGetter.GetSignedRoot(ctx, tenantIdentity, massifIndex)
-	if err != nil {
-		return nil, err
-	}
-	reader := prefetchingSealReader{
-		msg:            msg,
-		state:          state,
-		tenantIdentity: tenantIdentity,
-		massifIndex:    massifIndex,
-	}
-	return &reader, nil
-}
-
-func (r *prefetchingSealReader) GetSignedRoot(ctx context.Context, tenantIdentity string, massifIndex uint32, opts ...massifs.ReaderOption) (*cose.CoseSign1Message, massifs.MMRState, error) {
-	if tenantIdentity != r.tenantIdentity {
-		return nil, massifs.MMRState{}, fmt.Errorf("%w: tenant requested: %s, tenant prefetched: %s", ErrInconsistentUseOfPrefetchedSeal, tenantIdentity, r.tenantIdentity)
-	}
-	if massifIndex != r.massifIndex {
-		return nil, massifs.MMRState{}, fmt.Errorf("%w: massif requested: %d, massif prefetched: %d", ErrInconsistentUseOfPrefetchedSeal, massifIndex, r.massifIndex)
-	}
-	return r.msg, r.state, nil
+	return stdinToDecodedLogMassifs()
 }

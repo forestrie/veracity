@@ -1,3 +1,4 @@
+// Package replicatelogs provides a test suite for the ReplicateLogs command.
 package verifyconsistency
 
 import (
@@ -18,6 +19,5 @@ func (s *ReplicateLogsCmdSuite) SetupSuite() {
 }
 
 func TestReplicateLogsCmdSuite(t *testing.T) {
-
 	suite.Run(t, new(ReplicateLogsCmdSuite))
 }

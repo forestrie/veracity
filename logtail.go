@@ -3,14 +3,15 @@ package veracity
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
-	"github.com/datatrails/go-datatrails-common/azblob"
+	commoncbor "github.com/datatrails/go-datatrails-common/cbor"
 	"github.com/datatrails/go-datatrails-common/cose"
 	"github.com/datatrails/go-datatrails-merklelog/massifs"
 	"github.com/datatrails/go-datatrails-merklelog/massifs/snowflakeid"
+	"github.com/datatrails/go-datatrails-merklelog/massifs/storage"
 	"github.com/datatrails/go-datatrails-merklelog/massifs/watcher"
+	"github.com/google/uuid"
 	"github.com/urfave/cli/v2"
 )
 
@@ -18,19 +19,16 @@ type TailConfig struct {
 	// Interval defines the wait period between repeated tail checks if many
 	// checks have been asked for.
 	Interval time.Duration
-	// TenantIdentity identifies the log of interest
-	TenantIdentity string
+	LogID    storage.LogID
 }
 
 // LogTailActivity can represent either the seal or the massif that has most recently
 // been updated for the log.
 type LogTailActivity struct {
 	watcher.LogTail
-	LogSize         uint64
 	LastIDEpoch     uint8
 	LastIDTimestamp uint64
 	LogActivity     time.Time
-	TagActivity     time.Time
 }
 
 // MassifTail contains the massif specific tail information
@@ -47,7 +45,7 @@ type SealTail struct {
 	State  massifs.MMRState
 }
 
-// String returns a printable. loggable pretty rendering of the tail
+// String returns a printable pretty rendering of the tail
 func (st SealTail) String() string {
 
 	s := fmt.Sprintf(
@@ -56,81 +54,80 @@ func (st SealTail) String() string {
 		time.UnixMilli(st.State.Timestamp).UTC().Format(time.RFC3339),
 		st.LogActivity.UTC().Format(time.RFC3339),
 	)
-	if st.LastID != "" {
-		return fmt.Sprintf(
-			"%s, tag activity: %v",
-			s, st.TagActivity.UTC().Format(time.RFC3339),
-		)
-	}
-	return fmt.Sprintf("%s, tag activity: ** tag not set **", s)
+	return fmt.Sprintf(
+		"%s, log activity: %v",
+		s, st.LogActivity.UTC().Format(time.RFC3339),
+	)
 }
 
-// NewTailConfig derives a configuration from the supplied comand line options context
+// NewTailConfig derives a configuration from the supplied command line options context
 func NewTailConfig(cCtx *cli.Context, cmd *CmdCtx) (TailConfig, error) {
+
+	if cCtx.String("logid") == "" {
+		return TailConfig{}, fmt.Errorf("a logid is required")
+	}
+
 	cfg := TailConfig{}
 	// note: the cli defaults to 1 second interval and count = 1. so by default
 	// the interval is ignored. If count is 0 or > 1, we get a single second
 	// sleep by default.
 	cfg.Interval = cCtx.Duration("interval")
-	cfg.TenantIdentity = cCtx.String("tenant")
-	if cfg.TenantIdentity == "" {
-		return TailConfig{}, fmt.Errorf("tenant identity is required")
+
+	// transitional allow regular tenant id's from the datatrails era
+	cfg.LogID = storage.ParsePrefixedLogID("tenant/", cCtx.String("logid"))
+	if cfg.LogID == nil {
+		var err error
+		uid, err := uuid.Parse(cCtx.String("logid"))
+		if err != nil {
+			return TailConfig{}, err
+		}
+		cfg.LogID = uid[:]
 	}
 	return cfg, nil
 }
 
-// String returns a printable. loggable pretty rendering of the tail
+// String returns a printable pretty rendering of the tail
 func (lt MassifTail) String() string {
 
 	s := fmt.Sprintf(
-		"massif: %d, mmrSize: %d, lastid: %s, log activity: %v",
-		lt.Number, lt.LogSize, lt.LastID,
+		"massif: %d, lastid: %s, log activity: %v",
+		lt.Number, lt.LastID,
 		lt.LogActivity.UTC().Format(time.RFC3339),
 	)
-	if lt.LastID != "" {
-		return fmt.Sprintf(
-			"%s, tag activity: %v",
-			s, lt.TagActivity.UTC().Format(time.RFC3339),
-		)
-
-	}
-	return fmt.Sprintf("%s, tag activity: ** tag not set **", s)
+	return fmt.Sprintf(
+		"%s, log activity: %v",
+		s, lt.LogActivity.UTC().Format(time.RFC3339),
+	)
 }
 
 // TailSeal returns the most recently added seal for the log
 func TailSeal(
 	ctx context.Context,
-	rootReader massifs.SignedRootReader,
-	tenantIdentity string,
+	reader massifs.ObjectReader,
+	codec commoncbor.CBORCodec,
+	logID storage.LogID,
 ) (SealTail, error) {
 	var err error
-	var tailSeal massifs.LogBlobContext
+
 	st := SealTail{
 		LogTailActivity: LogTailActivity{
 			LogTail: watcher.LogTail{
-				Tenant: tenantIdentity,
+				LogID: logID,
 			},
 		},
 	}
-	tailSeal, st.Count, err = rootReader.GetLazyContext(
-		ctx, tenantIdentity, massifs.LastBlob, azblob.WithListTags())
-	if err != nil {
-		return SealTail{}, err
-	}
-	tags := tailSeal.Tags
-	msg, state, err := rootReader.ReadLogicalContext(ctx, tailSeal, azblob.WithGetTags())
-	if err != nil {
-		return SealTail{}, err
-	}
-	st.Signed = *msg
-	st.State = state
 
-	st.Path = tailSeal.BlobPath
-
-	st.Number, st.Ext, err = massifs.ParseMassifPathNumberExt(st.Path)
+	headIndex, err := reader.HeadIndex(ctx, storage.ObjectCheckpoint)
 	if err != nil {
-		return SealTail{}, err
+		return SealTail{}, fmt.Errorf("error reading head massif index: %w", err)
 	}
+
+	checkpt, err := massifs.GetCheckpoint(ctx, reader, codec, headIndex)
+	if err != nil {
+		return SealTail{}, fmt.Errorf("error reading checkpoint for tenant %x: %w", logID, err)
+	}
+	st.Signed = checkpt.Sign1Message
+	st.State = checkpt.MMRState
 
 	// The log activity as it stood when the seal was made is on the state
 	lastMS, err := snowflakeid.IDUnixMilli(st.State.IDTimestamp, uint8(st.State.CommitmentEpoch))
@@ -139,80 +136,55 @@ func TailSeal(
 	}
 
 	st.LogActivity = time.UnixMilli(lastMS)
-
-	// And the seal blob also has a tag so this can be indexed
-	//lastIDTag := tailSeal.Tags[massifs.TagKeyLastID]
-	st.LastID = tags[massifs.TagKeyLastID]
-	id, epoch, err := massifs.SplitIDTimestampHex(st.LastID)
-	if err != nil {
-		return SealTail{}, err
-	}
-	lastMS, err = snowflakeid.IDUnixMilli(id, epoch)
-	if err != nil {
-		return SealTail{}, err
-	}
-	st.TagActivity = time.UnixMilli(lastMS)
+	st.LastIDTimestamp = st.State.IDTimestamp
 
 	return st, err
+}
+
+type storageTailer interface {
+	HeadIndex(ctx context.Context, ty storage.ObjectType) (uint32, error)
+}
+
+type massifTailer interface {
+	storageTailer
 }
 
 // TailMassif returns the active massif for the tenant
 func TailMassif(
 	ctx context.Context,
-	massifReader MassifReader,
-	tenantIdentity string,
+	reader massifs.ObjectReader,
+	logID storage.LogID,
 ) (MassifTail, error) {
 	var err error
 	lt := MassifTail{
 		LogTailActivity: LogTailActivity{
 			LogTail: watcher.LogTail{
-				Tenant: tenantIdentity,
+				LogID: logID,
 			},
 		},
 	}
 
-	tailMassif, err := massifReader.GetHeadMassif(ctx, tenantIdentity, massifs.WithListBlobOption(azblob.WithGetTags()))
+	headIndex, err := reader.HeadIndex(ctx, storage.ObjectMassifStart)
 	if err != nil {
-		return MassifTail{}, fmt.Errorf(
-			"error reading head massif for tenant %s: %w",
-			tenantIdentity, err)
+		return MassifTail{}, fmt.Errorf("error reading head massif index: %w", err)
 	}
-	lt.Path = tailMassif.BlobPath
-	lt.Number = tailMassif.Start.MassifIndex
-	number, ext, err := massifs.ParseMassifPathNumberExt(lt.Path)
-	if err != nil {
-		return MassifTail{}, err
-	}
-	if number != lt.Number {
-		return MassifTail{}, fmt.Errorf("path base file doesn't match massif index in log start record")
-	}
-	lt.Ext = ext
 
-	logActivityMS, err := tailMassif.LastCommitUnixMS(uint8(tailMassif.Start.CommitmentEpoch))
+	start, err := massifs.GetMassifStart(ctx, reader, headIndex)
+
+	lt.Number = headIndex
+	lt.OType = storage.ObjectMassifData
+
+	logActivityMS, err := snowflakeid.IDUnixMilli(start.LastID, uint8(start.CommitmentEpoch))
 	if err != nil {
 		return MassifTail{}, fmt.Errorf(
-			"error reading last activity time from head massif for tenant %s: %w",
-			tenantIdentity, err)
+			"error reading last activity time from head massif for log %x: %w",
+			logID, err)
 	}
 	lt.LogActivity = time.UnixMilli(logActivityMS)
-	firstIndexTag := tailMassif.Tags[massifs.TagKeyFirstIndex]
-	lt.FirstIndex, err = strconv.ParseUint(firstIndexTag, 16, 64)
-	if err != nil {
-		return MassifTail{}, err
-	}
 
-	lt.LogSize = tailMassif.RangeCount()
+	lt.LastIDTimestamp = start.LastID
+	lt.LastIDEpoch = uint8(start.CommitmentEpoch)
 
-	lt.LastID = tailMassif.Tags[massifs.TagKeyLastID]
-	lt.LastIDTimestamp, lt.LastIDEpoch, err = massifs.SplitIDTimestampHex(lt.LastID)
-	if err != nil {
-		return MassifTail{}, err
-	}
-	lastMS, err := snowflakeid.IDUnixMilli(lt.LastIDTimestamp, lt.LastIDEpoch)
-	if err != nil {
-		return MassifTail{}, err
-	}
-	lt.TagActivity = time.UnixMilli(lastMS)
 	return lt, nil
 }
 
@@ -220,7 +192,7 @@ func NewLogTailCmd() *cli.Command {
 	return &cli.Command{Name: "tail",
 		Usage: `report the current tail (most recent end) of the log
 
-		if --count is > 1, re-check every interval seconds until the count is exhasted
+		if --count is > 1, re-check every interval seconds until the count is exhausted
 		if --count is explicitly zero, check forever
 		`,
 		Flags: []cli.Flag{
@@ -231,8 +203,8 @@ func NewLogTailCmd() *cli.Command {
 			},
 
 			&cli.StringFlag{
-				Name: "tenant", Aliases: []string{"t"},
-				Usage:    "tenant identity",
+				Name:     "logid",
+				Usage:    "log identifier, as a string encoded uuid",
 				Required: true,
 			},
 
@@ -251,14 +223,21 @@ func NewLogTailCmd() *cli.Command {
 			cmd := &CmdCtx{}
 			ctx := context.Background()
 
-			if err = cfgMassifReader(cmd, cCtx); err != nil {
+			if err = cfgMassifFmt(cmd, cCtx); err != nil {
 				return err
 			}
-			if err = cfgRootReader(cmd, cCtx); err != nil {
+
+			reader, err := newMassifReader(cmd, cCtx)
+			if err != nil {
 				return err
 			}
 
 			cfg, err := NewTailConfig(cCtx, cmd)
+			if err != nil {
+				return err
+			}
+
+			codec, err := massifs.NewCBORCodec()
 			if err != nil {
 				return err
 			}
@@ -270,14 +249,14 @@ func NewLogTailCmd() *cli.Command {
 				var lt MassifTail
 				var st SealTail
 				if mode == "both" || mode == "massif" {
-					lt, err = TailMassif(ctx, cmd.massifReader, cfg.TenantIdentity)
+					lt, err = TailMassif(ctx, reader, cfg.LogID)
 					if err != nil {
 						return err
 					}
 					fmt.Printf("%s\n", lt.String())
 				}
 				if mode == "both" || mode == "seal" {
-					st, err = TailSeal(ctx, cmd.rootReader, cfg.TenantIdentity)
+					st, err = TailSeal(ctx, reader, codec, cfg.LogID)
 					if err != nil {
 						return err
 					}

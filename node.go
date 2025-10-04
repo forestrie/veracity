@@ -1,6 +1,7 @@
 package veracity
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/urfave/cli/v2"
@@ -19,16 +20,15 @@ func NewNodeCmd() *cli.Command {
 			},
 		},
 		Action: func(cCtx *cli.Context) error {
-			var err error
 			cmd := &CmdCtx{}
-			err = cfgMassif(cmd, cCtx)
+			massif, err := cfgMassif(context.Background(), cmd, cCtx)
 			if err != nil {
 				return err
 			}
 
 			mmrIndex := cCtx.Uint64("mmrindex")
 
-			value, err := cmd.massif.Get(mmrIndex)
+			value, err := massif.Get(mmrIndex)
 			if err != nil {
 				return err
 			}

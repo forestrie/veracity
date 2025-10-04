@@ -10,13 +10,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/datatrails/go-datatrails-common-api-gen/assets/v2/assets"
 	v2assets "github.com/datatrails/go-datatrails-common-api-gen/assets/v2/assets"
 	"github.com/datatrails/go-datatrails-common/logger"
 	"github.com/datatrails/go-datatrails-merklelog/massifs"
 	"github.com/datatrails/go-datatrails-merklelog/mmr"
-	"github.com/datatrails/go-datatrails-merklelog/mmrtesting"
 	"github.com/datatrails/go-datatrails-simplehash/simplehash"
-	"github.com/datatrails/veracity/veracitytesting"
+	"github.com/datatrails/veracity/tests/testcontext"
+	"github.com/forestrie/go-merklelog-datatrails/datatrails"
+	"github.com/robinbryce/go-merklelog-provider-testing/mmrtesting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,12 +32,16 @@ func TestNodeScanCmd(t *testing.T) {
 	logger.Sugar.Infof("url: '%s'", url)
 
 	// Create a single massif in the emulator
+	tc, logID, _, generated := testcontext.CreateLogBuilderContext(
+		t, 8, 1,
+		mmrtesting.WithTestLabelPrefix("TestNodeScanCmd"),
+	)
 
-	tenantID := mmrtesting.DefaultGeneratorTenantIdentity
-	testContext, testGenerator, cfg := veracitytesting.NewAzuriteTestContext(t, "TestNodeScanCmd")
+	// tc.GenerateTenantLog(10)
 
-	eventsResponse := veracitytesting.GenerateTenantLog(&testContext, testGenerator, 10, tenantID, true, massifHeight, LeafTypePlain)
-	marshaledEvents, err := marshalEventsList(eventsResponse)
+	tenantID := datatrails.Log2TenantID(logID)
+
+	marshaledEvents, eventsResponse, err := marshalEventsList(tc, generated)
 	require.NoError(t, err)
 
 	// Arbitrarily chose to look for leaf 7
@@ -70,7 +76,7 @@ func TestNodeScanCmd(t *testing.T) {
 		// precise node is located by the mmrIndex and the leafIndex derived
 		// from that.
 		{testArgs: []string{
-			"<progname>", "-u", "-", "-s", "devstoreaccount1", "-c", cfg.Container, "-t", tenantID,
+			"<progname>", "-s", "devstoreaccount1", "-c", tc.Cfg.Container, "-t", tenantID,
 			"nodescan", "-m", "0", "-v", expectedLeafNodeValue}},
 	}
 
@@ -85,17 +91,38 @@ func TestNodeScanCmd(t *testing.T) {
 	}
 }
 
-func marshalEventsList(eventsResponse []*v2assets.EventResponse) ([][]byte, error) {
-	marshaller := v2assets.NewFlatMarshalerForEvents()
+func marshalEventsList(
+	tc *testcontext.TestContext, generated mmrtesting.GeneratedLeaves) ([][]byte, []*assets.EventResponse, error) {
 
+	marshaller := v2assets.NewFlatMarshalerForEvents()
 	eventJsonList := make([][]byte, 0)
-	for _, event := range eventsResponse {
+	events := make([]*assets.EventResponse, len(generated.MMRIndices))
+
+	for iLeaf := 0; iLeaf < len(generated.MMRIndices); iLeaf++ {
+		event := datatrailsAssetEvent(
+			tc.T, generated.Encoded[iLeaf], generated.Args[iLeaf],
+			generated.MMRIndices[iLeaf], uint8(massifs.Epoch2038),
+		)
+		events[iLeaf] = event
 		eventJson, err := marshaller.Marshal(event)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		eventJsonList = append(eventJsonList, eventJson)
 	}
-	return eventJsonList, nil
+	return eventJsonList, events, nil
+}
+
+func datatrailsAssetEvent(t *testing.T, a any, args mmrtesting.AddLeafArgs, index uint64, epoch uint8) *assets.EventResponse {
+	ae, ok := a.(*assets.EventResponse)
+	require.True(t, ok, "expected *assets.EventResponse, got %T", a)
+
+	ae.MerklelogEntry = &assets.MerkleLogEntry{
+		Commit: &assets.MerkleLogCommit{
+			Index:       index,
+			Idtimestamp: massifs.IDTimestampToHex(args.ID, epoch),
+		},
+	}
+	return ae
 }

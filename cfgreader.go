@@ -16,21 +16,14 @@ const (
 
 // cfgReader establishes the blob read only data accessor
 // only azure blob storage is supported. Both emulated and production.
-func cfgReader(cmd *CmdCtx, cCtx *cli.Context, forceProdUrl bool) (azblob.Reader, error) {
+func cfgReader(cmd *CmdCtx, cCtx *cli.Context, url string) (azblob.Reader, error) {
 	var err error
 	var reader azblob.Reader
 
-	if cmd.log == nil {
+	if cmd.Log == nil {
 		if err = cfgLogging(cmd, cCtx); err != nil {
 			return nil, err
 		}
-	}
-
-	// We prefer loading this from the command line argument, but if upstream code requests we default
-	// to the production URL we inject that here.
-	url := cCtx.String("data-url")
-	if forceProdUrl {
-		url = DefaultRemoteMassifURL
 	}
 
 	// These values are relevant for direct connection to Azure blob store (or emulator), but are
@@ -42,19 +35,22 @@ func cfgReader(cmd *CmdCtx, cCtx *cli.Context, forceProdUrl bool) (azblob.Reader
 
 	if account == "" && url == "" {
 		account = AzuriteStorageAccount
-		cmd.log.Infof("defaulting to the emulator account %s", account)
+		cmd.Log.Infof("defaulting to the emulator account %s", account)
 	}
 
 	if container == "" {
 		container = DefaultContainer
-		cmd.log.Infof("defaulting to the standard container %s", container)
+		cmd.Log.Infof("defaulting to the standard container %s", container)
 	}
 
 	if account == AzuriteStorageAccount {
-		cmd.log.Infof("using the emulator and authorizing with the well known private key (for production no authorization is required)")
+		if url != "" {
+			return nil, fmt.Errorf("the url for the emulator account is fixed, overriding it is not supported or useful")
+		}
+		cmd.Log.Infof("using the emulator and authorizing with the well known private key (for production no authorization is required)")
 		// reader, err := azblob.NewAzurite(url, container)
 		devCfg := azblob.NewDevConfigFromEnv()
-		cmd.readerURL = devCfg.URL
+		cmd.RemoteURL = devCfg.URL
 		reader, err = azblob.NewDev(devCfg, container)
 		if err != nil {
 			return nil, err
@@ -71,7 +67,7 @@ func cfgReader(cmd *CmdCtx, cCtx *cli.Context, forceProdUrl bool) (azblob.Reader
 
 	if envAuth {
 		devCfg := azblob.NewDevConfigFromEnv()
-		cmd.readerURL = devCfg.URL
+		cmd.RemoteURL = devCfg.URL
 		reader, err = azblob.NewDev(devCfg, container)
 		if err != nil {
 			return nil, err
@@ -79,8 +75,8 @@ func cfgReader(cmd *CmdCtx, cCtx *cli.Context, forceProdUrl bool) (azblob.Reader
 		return reader, nil
 	}
 
-	cmd.readerURL = url
-	reader, err = azblob.NewReaderNoAuth(url, azblob.WithContainer(container), azblob.WithAccountName(account))
+	cmd.RemoteURL = url
+	reader, err = azblob.NewReaderNoAuth(cmd.Log, url, azblob.WithContainer(container), azblob.WithAccountName(account))
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to blob store: %v", err)
 	}

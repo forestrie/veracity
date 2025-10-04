@@ -11,8 +11,9 @@ import (
 	"time"
 
 	"github.com/datatrails/go-datatrails-common/logger"
-	"github.com/datatrails/go-datatrails-merklelog/mmrtesting"
-	"github.com/datatrails/veracity/veracitytesting"
+	"github.com/datatrails/veracity/tests/testcontext"
+	"github.com/forestrie/go-merklelog-datatrails/datatrails"
+	"github.com/robinbryce/go-merklelog-provider-testing/mmrtesting"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -29,16 +30,18 @@ func TestNodeCmd(t *testing.T) {
 	logger.Sugar.Infof("url: '%s'", url)
 
 	// Create a single massif in the emulator
+	tc, logID := testcontext.CreateLogContext(
+		t, 8, 1,
+		mmrtesting.WithTestLabelPrefix("TestNodeCmd"),
+	)
 
-	tenantID := mmrtesting.DefaultGeneratorTenantIdentity
-	testContext, testGenerator, cfg := veracitytesting.NewAzuriteTestContext(t, "TestNodeCmd")
-	veracitytesting.GenerateTenantLog(&testContext, testGenerator, 10, tenantID, true, massifHeight, LeafTypePlain)
+	tenantID := datatrails.Log2TenantID(logID)
 
 	tests := []struct {
 		testArgs []string
 	}{
 		// get node 1
-		{testArgs: []string{"<progname>", "-u", "-", "-s", "devstoreaccount1", "-c", cfg.Container, "-t", tenantID, "node", fmt.Sprintf("%d", 1)}},
+		{testArgs: []string{"<progname>", "-s", "devstoreaccount1", "-c", tc.Cfg.Container, "-t", tenantID, "node", fmt.Sprintf("%d", 1)}},
 	}
 
 	for _, tc := range tests {

@@ -23,12 +23,12 @@ func cfgLogging(cmd *CmdCtx, cCtx *cli.Context) error {
 	// package. For that reason we override the TEST logger instead. It is only
 	// integration tests that need to make use of this.
 	if logLevel == "TEST" {
-		cmd.log = &logger.WrappedLogger{
+		cmd.Log = &logger.WrappedLogger{
 			SugaredLogger: zap.NewNop().Sugar(),
 		}
 	} else {
 		logger.New(logLevel, logger.WithConsole())
-		cmd.log = logger.Sugar
+		cmd.Log = logger.Sugar
 	}
 
 	return nil
