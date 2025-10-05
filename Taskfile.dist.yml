@@ -85,7 +85,7 @@ tasks:
             {{.GO_TEST_TAGS}} \
             -race \
             -v \
-            ./cmd/
+            ./...
 
   test:binary:setup:
     cmds:
@@ -142,28 +142,3 @@ tasks:
         > ./run.sh
         ./shunit/shunit2 ./run.sh
         popd
-
-  test:binary:xx:
-    cmds:
-      - |
-        downloadDir=$(mktemp -d)
-        installDir={{.ROOT_DIR}}/tests/systemtest/shunit
-        mkdir -p ${installDir}
-
-        # We need to get the master branch of shunit2 to get junit output
-        wget -q -O ${downloadDir}/shunit2.zip https://github.com/kward/shunit2/archive/refs/heads/master.zip
-        unzip -q ${downloadDir}/shunit2.zip -d ${downloadDir}
-
-        cp ${downloadDir}/shunit2-master/shunit2 ${installDir}
-        cp ${downloadDir}/shunit2-master/shunit2_test_helpers ${installDir}
-        cp ${downloadDir}/shunit2-master/test_runner ${installDir}
-        cp -r ${downloadDir}/shunit2-master/lib ${installDir}
-
-        rm -rf ${downloadDir}
-      - |
-        pushd {{.ROOT_DIR}}/tests/systemtest
-        ./shunit/shunit2 ./test.sh --output-junit-xml=res.xml
-        popd
-
-    sources:
-      - "{{.ROOT_DIR}}/tests/systemtest"
