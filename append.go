@@ -18,8 +18,9 @@ import (
 	"github.com/fxamacker/cbor/v2"
 	"github.com/veraison/go-cose"
 
-	commoncose "github.com/datatrails/go-datatrails-common/cose"
 	"github.com/datatrails/go-datatrails-merklelog/massifs"
+	commoncbor "github.com/datatrails/go-datatrails-merklelog/massifs/cbor"
+	commoncose "github.com/datatrails/go-datatrails-merklelog/massifs/cose"
 	"github.com/datatrails/go-datatrails-merklelog/massifs/storage"
 	"github.com/datatrails/go-datatrails-merklelog/mmr"
 	"github.com/datatrails/veracity/keyio"
@@ -337,7 +338,7 @@ func NewAppendCmd() *cli.Command {
 			// This is an array of marshaled COSE_Sign1's
 			receiptMsg := peaksHeader.PeakReceipts[peakIndex]
 			signed, err := commoncose.NewCoseSign1MessageFromCBOR(
-				receiptMsg, commoncose.WithDecOptions(massifs.CheckpointDecOptions()))
+				receiptMsg, commoncose.WithDecOptions(commoncbor.DecOptions))
 			if err != nil {
 				return fmt.Errorf(
 					"%w: failed to decode pre-signed receipt for MMR(%d)",

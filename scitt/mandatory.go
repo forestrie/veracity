@@ -4,8 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/datatrails/go-datatrails-common/cose"
-	commoncose "github.com/datatrails/go-datatrails-common/cose"
+	"github.com/datatrails/go-datatrails-merklelog/massifs/cose"
 )
 
 const (
@@ -70,7 +69,7 @@ func RegistrationMandatoryChecks(
 	}
 
 	// cbor decode statement
-	statement, err := commoncose.NewCoseSign1MessageFromCBOR(signedStatement)
+	statement, err := cose.NewCoseSign1MessageFromCBOR(signedStatement)
 
 	if err != nil {
 		return CheckedStatement{}, &ConciseProblemDetails{
@@ -90,7 +89,7 @@ func RegistrationMandatoryChecks(
 	err = statement.VerifyWithCWTPublicKey(nil)
 
 	// if the error is because there is no cwt issuer, ensure we communicate that
-	if errors.Is(err, commoncose.ErrCWTClaimsNoIssuer) {
+	if errors.Is(err, cose.ErrCWTClaimsNoIssuer) {
 		return CheckedStatement{}, &ConciseProblemDetails{
 			Title:        ProblemTitleRejected,
 			Detail:       "Signed Statement not accepted by the current Registration Policy. issuer claim not present in CWT",
@@ -99,7 +98,7 @@ func RegistrationMandatoryChecks(
 		}
 	}
 
-	if errors.Is(err, commoncose.ErrCWTClaimsNoSubject) {
+	if errors.Is(err, cose.ErrCWTClaimsNoSubject) {
 		return CheckedStatement{}, &ConciseProblemDetails{
 			Title:        ProblemTitleRejected,
 			Detail:       "Signed Statement not accepted by the current Registration Policy. subject claim not present in CWT",
@@ -109,7 +108,7 @@ func RegistrationMandatoryChecks(
 	}
 
 	// if the error is because there is no cwt verification key, ensure we communicate that
-	if errors.Is(err, commoncose.ErrCWTClaimsNoCNF) {
+	if errors.Is(err, cose.ErrCWTClaimsNoCNF) {
 
 		if policy.RequireCNFPublic || !policy.AllowUnverified {
 			return CheckedStatement{}, &ConciseProblemDetails{
