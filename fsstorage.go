@@ -17,8 +17,8 @@ func NewCmdStorageProviderFS(
 	ctx context.Context,
 	cCtx *cli.Context, cmd *CmdCtx,
 	dataLocal string,
+	createRootDir bool,
 ) (*fsstorage.CachingStore, error) {
-
 	var err error
 	massifExt := storage.V1MMRExtSep + storage.V1MMRMassifExt
 	if cCtx.IsSet("massif-ext") {
@@ -27,7 +27,10 @@ func NewCmdStorageProviderFS(
 
 	opts := fsstorage.Options{
 		FSOptions: fsstorage.FSOptions{
+			MassifFile:      cCtx.String("massif-file"),
+			CheckpointFile:  cCtx.String("checkpoint-file"),
 			RootDir:         dataLocal,
+			CreateRootDir:  createRootDir,
 			MassifExtension: massifExt,
 		},
 	}

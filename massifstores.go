@@ -29,17 +29,30 @@ func newMassifReader(cmd *CmdCtx, cCtx *cli.Context) (readerSelector, error) {
 	return newMassifStore(cmd, cCtx)
 }
 
+func localDataOptionsSet(cCtx *cli.Context) bool {
+	if cCtx.IsSet("data-local") && cCtx.String("data-local") != "" {
+		return true
+	}
+	if cCtx.IsSet("massif-file") && cCtx.String("massif-file") != "" {
+		return true
+	}
+	if cCtx.IsSet("checkpoint-file") && cCtx.String("checkpoint-file") != "" {
+		return true
+	}
+	return false
+}
+
 func newMassifStore(cmd *CmdCtx, cCtx *cli.Context) (omniMassifReader, error) {
 	var err error
 
-	localLog := cCtx.String("data-local")
+	localSet := localDataOptionsSet(cCtx)
 	remoteLog := cCtx.String("data-url")
 
-	if localLog != "" && remoteLog != "" {
+	if localSet && remoteLog != "" {
 		return nil, fmt.Errorf("can't use data-local and data-url at the same time")
 	}
 
-	if localLog == "" && remoteLog == "" && !IsStorageEmulatorEnabled(cCtx) {
+	if !localSet && remoteLog == "" && !IsStorageEmulatorEnabled(cCtx) {
 		remoteLog = DefaultRemoteMassifURL
 	}
 
@@ -52,9 +65,9 @@ func newMassifStore(cmd *CmdCtx, cCtx *cli.Context) (omniMassifReader, error) {
 		}
 		return reader, nil
 	}
-	if localLog != "" {
+	if localSet {
 
-		reader, err := NewCmdStorageProviderFS(context.Background(), cCtx, cmd, localLog)
+		reader, err := NewCmdStorageProviderFS(context.Background(), cCtx, cmd, cCtx.String("data-local"), false)
 		if err != nil {
 			return nil, fmt.Errorf("could not create massif reader: %w", err)
 		}

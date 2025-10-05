@@ -87,7 +87,7 @@ tasks:
             -v \
             ./...
 
-  test:binary:
+  test:binary:setup:
     cmds:
       - |
         downloadDir=$(mktemp -d)
@@ -104,10 +104,41 @@ tasks:
         cp -r ${downloadDir}/shunit2-master/lib ${installDir}
 
         rm -rf ${downloadDir}
-      - |
         pushd {{.ROOT_DIR}}/tests/systemtest
-        ./shunit/shunit2 ./test.sh --output-junit-xml=res.xml
+        cat ./test-setup.sh \
+          ./test-01-*.sh \
+          ./test-02-*.sh \
+          ./test-03-*.sh \
+          ./test-04-*.sh \
+        > ./run.sh
         popd
 
-    sources:
-      - "{{.ROOT_DIR}}/tests/systemtest"
+  test:binary:
+    vars:
+      OUTARGS: '{{.OUTARGS | default "--output-junit-xml=res.xml"}}'
+    cmds:
+      - task: test:binary:setup
+      - task: test:binary:run
+        vars:
+          OUTARGS: "{{.OUTARGS}}"
+
+  test:binary:run:
+    vars:
+      OUTARGS: '{{.OUTARGS | default ""}}'
+    cmds:
+      - |
+        pushd {{.ROOT_DIR}}/tests/systemtest
+        ./shunit/shunit2 ./run.sh  {{.OUTARGS}}
+        popd
+
+  test:binary:one:
+    requires:
+      vars: [TEST]
+    cmds:
+      - |
+        pushd {{.ROOT_DIR}}/tests/systemtest
+        cat ./test-setup.sh \
+          ./test-{{.TEST}}-*.sh \
+        > ./run.sh
+        ./shunit/shunit2 ./run.sh
+        popd
