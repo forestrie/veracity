@@ -4,6 +4,7 @@ package veracity
 import (
 	"fmt"
 
+	"github.com/robinbryce/go-merklelog-azure/blobs"
 	"github.com/urfave/cli/v2"
 )
 
@@ -51,12 +52,12 @@ func NewApp(version string, ikwid bool) *cli.App {
 		})
 		app.Flags = append(app.Flags, &cli.StringFlag{
 			Name: "account", Aliases: []string{"s"},
-			Usage: fmt.Sprintf("the azure storage account. defaults to `%s' and triggers use of emulator url", AzuriteStorageAccount),
+			Usage: fmt.Sprintf("the azure storage account. defaults to `%s' and triggers use of emulator url", blobs.AzuriteStorageAccount),
 		})
 		app.Flags = append(app.Flags, &cli.StringFlag{
 			Name: "container", Aliases: []string{"c"},
 			Usage: "the azure storage container. this is necessary when using the azurite storage emulator",
-			Value: DefaultContainer,
+			Value: blobs.DefaultContainer,
 		})
 	}
 
