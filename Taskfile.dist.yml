@@ -85,9 +85,65 @@ tasks:
             {{.GO_TEST_TAGS}} \
             -race \
             -v \
-            ./...
+            ./cmd/
+
+  test:binary:setup:
+    cmds:
+      - |
+        downloadDir=$(mktemp -d)
+        installDir={{.ROOT_DIR}}/tests/systemtest/shunit
+        mkdir -p ${installDir}
+
+        # We need to get the master branch of shunit2 to get junit output
+        wget -q -O ${downloadDir}/shunit2.zip https://github.com/kward/shunit2/archive/refs/heads/master.zip
+        unzip -q ${downloadDir}/shunit2.zip -d ${downloadDir}
+
+        cp ${downloadDir}/shunit2-master/shunit2 ${installDir}
+        cp ${downloadDir}/shunit2-master/shunit2_test_helpers ${installDir}
+        cp ${downloadDir}/shunit2-master/test_runner ${installDir}
+        cp -r ${downloadDir}/shunit2-master/lib ${installDir}
+
+        rm -rf ${downloadDir}
+        pushd {{.ROOT_DIR}}/tests/systemtest
+        cat ./test-setup.sh \
+          ./test-01-*.sh \
+          ./test-02-*.sh \
+          ./test-03-*.sh \
+          ./test-04-*.sh \
+        > ./run.sh
+        popd
 
   test:binary:
+    vars:
+      OUTARGS: '{{.OUTARGS | default "--output-junit-xml=res.xml"}}'
+    cmds:
+      - task: test:binary:setup
+      - task: test:binary:run
+        vars:
+          OUTARGS: "{{.OUTARGS}}"
+
+  test:binary:run:
+    vars:
+      OUTARGS: '{{.OUTARGS | default ""}}'
+    cmds:
+      - |
+        pushd {{.ROOT_DIR}}/tests/systemtest
+        ./shunit/shunit2 ./run.sh  {{.OUTARGS}}
+        popd
+
+  test:binary:one:
+    requires:
+      vars: [TEST]
+    cmds:
+      - |
+        pushd {{.ROOT_DIR}}/tests/systemtest
+        cat ./test-setup.sh \
+          ./test-{{.TEST}}-*.sh \
+        > ./run.sh
+        ./shunit/shunit2 ./run.sh
+        popd
+
+  test:binary:xx:
     cmds:
       - |
         downloadDir=$(mktemp -d)

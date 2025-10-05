@@ -309,7 +309,7 @@ func NewVerifiedReplica(
 		return nil, fmt.Errorf("failed to select remote log %s: %w", logID, err)
 	}
 	localReader, err := NewCmdStorageProviderFS(
-		context.Background(), cCtx, cmd, cCtx.String("replicadir"))
+		context.Background(), cCtx, cmd, cCtx.String("replicadir"), true)
 	if err != nil {
 		return nil, err
 	}

@@ -27,8 +27,17 @@ func NewApp(version string, ikwid bool) *cli.App {
 			},
 			&cli.StringFlag{
 				Name: "data-local", Aliases: []string{"l"},
-				Usage: "filesystem location to load merkle log data from. can be a directory of massifs or a single file. mutually exclusive with data-url; if neither option is supplied, DataTrails' live log data will be used",
+				Usage: "filesystem location to load merkle log data from. can be a directory of massifs or a single file. mutually exclusive with data-url",
 			},
+			&cli.StringFlag{
+				Name:  "massif-file",
+				Usage: "load a single massif from this file, added to any massifs loaded from data-local",
+			},
+			&cli.StringFlag{
+				Name:  "checkpoint-file",
+				Usage: "load a single checkpoint from this file, added to any checkpoints loaded from data-local",
+			},
+
 			&cli.StringFlag{
 				Name: "tenant", Aliases: []string{"t"},
 				Usage: "tenant or list of tenants as a `,` separated list. commands which operate on a single tenant take the first tenant in the list",
