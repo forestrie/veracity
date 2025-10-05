@@ -48,7 +48,7 @@ func newMassifStore(cmd *CmdCtx, cCtx *cli.Context) (omniMassifReader, error) {
 	localSet := localDataOptionsSet(cCtx)
 	remoteLog := cCtx.String("data-url")
 
-	if !localSet && remoteLog != "" {
+	if localSet && remoteLog != "" {
 		return nil, fmt.Errorf("can't use data-local and data-url at the same time")
 	}
 
