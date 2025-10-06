@@ -4,27 +4,28 @@ go 1.24.0
 
 replace (
 	github.com/datatrails/go-datatrails-common => ../go-datatrails-common
-	github.com/datatrails/go-datatrails-merklelog/massifs => ../go-datatrails-merklelog/massifs
-	github.com/datatrails/go-datatrails-merklelog/mmr => ../go-datatrails-merklelog/mmr
+	github.com/forestrie/go-merklelog-azure => ../go-merklelog-azure
 	github.com/forestrie/go-merklelog-datatrails => ../go-merklelog-datatrails
-	github.com/robinbryce/go-merklelog-azure => ../go-merklelog-azure
-	github.com/robinbryce/go-merklelog-provider-testing => ../go-merklelog-provider-testing
+	github.com/forestrie/go-merklelog-fs => ../go-merklelog-fs
+	github.com/forestrie/go-merklelog-provider-testing => ../go-merklelog-provider-testing
+	github.com/forestrie/go-merklelog/massifs => ../go-merklelog/massifs
+	github.com/forestrie/go-merklelog/mmr => ../go-merklelog/mmr
 )
 
 require (
 	github.com/datatrails/go-datatrails-common v0.30.0
 	github.com/datatrails/go-datatrails-common-api-gen v0.8.0
-	github.com/datatrails/go-datatrails-merklelog/massifs v0.6.0
-	github.com/datatrails/go-datatrails-merklelog/mmr v0.4.0
 	github.com/datatrails/go-datatrails-serialization/eventsv1 v0.0.3
 	github.com/datatrails/go-datatrails-simplehash v0.2.0
+	github.com/forestrie/go-merklelog-azure v0.0.0-20250928182018-06ed158d48af
 	github.com/forestrie/go-merklelog-datatrails v0.0.0
+	github.com/forestrie/go-merklelog-fs v0.0.0-20250928180927-a4773e335b22
+	github.com/forestrie/go-merklelog-provider-testing v0.0.0-00010101000000-000000000000
+	github.com/forestrie/go-merklelog/massifs v0.0.2
+	github.com/forestrie/go-merklelog/mmr v0.4.0
 	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uiprogress v0.0.1
-	github.com/robinbryce/go-merklelog-azure v0.0.0-20250928182018-06ed158d48af
-	github.com/robinbryce/go-merklelog-fs v0.0.0-20250928180927-a4773e335b22
-	github.com/robinbryce/go-merklelog-provider-testing v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/veraison/go-cose v1.3.0
@@ -71,12 +72,12 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.36.0 // indirect
-	golang.org/x/net v0.38.0 // indirect
-	golang.org/x/sys v0.31.0 // indirect
-	golang.org/x/text v0.23.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20250106144421-5f5ef82da422 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250115164207-1a7da9e5054f // indirect
-	google.golang.org/grpc v1.71.1 // indirect
+	golang.org/x/crypto v0.42.0 // indirect
+	golang.org/x/net v0.44.0 // indirect
+	golang.org/x/sys v0.36.0 // indirect
+	golang.org/x/text v0.29.0 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20250707201910-8d1bb00bc6a7 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250707201910-8d1bb00bc6a7 // indirect
+	google.golang.org/grpc v1.75.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

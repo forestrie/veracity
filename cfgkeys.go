@@ -3,7 +3,7 @@ package veracity
 import (
 	"fmt"
 
-	"github.com/datatrails/go-datatrails-merklelog/massifs"
+	"github.com/forestrie/go-merklelog/massifs"
 	"github.com/datatrails/veracity/keyio"
 	"github.com/urfave/cli/v2"
 )

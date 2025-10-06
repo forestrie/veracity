@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/datatrails/go-datatrails-merklelog/massifs/storage"
+	"github.com/forestrie/go-merklelog/massifs/storage"
 	"github.com/google/uuid"
-	fsstorage "github.com/robinbryce/go-merklelog-fs/storage"
+	fsstorage "github.com/forestrie/go-merklelog-fs/storage"
 	"github.com/stretchr/testify/require"
 )
 

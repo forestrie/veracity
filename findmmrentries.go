@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/datatrails/go-datatrails-common/logger"
-	"github.com/datatrails/go-datatrails-merklelog/massifs"
-	"github.com/datatrails/go-datatrails-merklelog/massifs/storage"
-	"github.com/datatrails/go-datatrails-merklelog/mmr"
+	"github.com/forestrie/go-merklelog/massifs"
+	"github.com/forestrie/go-merklelog/massifs/storage"
+	"github.com/forestrie/go-merklelog/mmr"
 	"github.com/datatrails/go-datatrails-serialization/eventsv1"
 	appdata "github.com/forestrie/go-merklelog-datatrails/appdata"
 	"github.com/forestrie/go-merklelog-datatrails/appentry"

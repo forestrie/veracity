@@ -1,7 +1,7 @@
 package veracity
 
 import (
-	"github.com/datatrails/go-datatrails-merklelog/massifs/snowflakeid"
+	"github.com/forestrie/go-merklelog/massifs/snowflakeid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

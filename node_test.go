@@ -13,7 +13,7 @@ import (
 	"github.com/datatrails/go-datatrails-common/logger"
 	"github.com/datatrails/veracity/tests/testcontext"
 	"github.com/forestrie/go-merklelog-datatrails/datatrails"
-	"github.com/robinbryce/go-merklelog-provider-testing/mmrtesting"
+	"github.com/forestrie/go-merklelog-provider-testing/mmrtesting"
 	"github.com/stretchr/testify/assert"
 )
 

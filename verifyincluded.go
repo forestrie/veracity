@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/datatrails/go-datatrails-merklelog/massifs"
-	"github.com/datatrails/go-datatrails-merklelog/mmr"
+	"github.com/forestrie/go-merklelog/massifs"
+	"github.com/forestrie/go-merklelog/mmr"
 	"github.com/forestrie/go-merklelog-datatrails/appentry"
 	"github.com/forestrie/go-merklelog-datatrails/datatrails"
 	"github.com/urfave/cli/v2"

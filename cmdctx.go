@@ -3,9 +3,9 @@ package veracity
 import (
 	"fmt"
 
-	"github.com/datatrails/go-datatrails-merklelog/massifs/cbor"
+	"github.com/forestrie/go-merklelog/massifs/cbor"
 	"github.com/datatrails/go-datatrails-common/logger"
-	"github.com/datatrails/go-datatrails-merklelog/massifs/snowflakeid"
+	"github.com/forestrie/go-merklelog/massifs/snowflakeid"
 	"github.com/datatrails/veracity/keyio"
 )
 

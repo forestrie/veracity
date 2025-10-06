@@ -3,8 +3,8 @@ package veracity
 import (
 	"context"
 
-	"github.com/datatrails/go-datatrails-merklelog/massifs/storage"
-	fsstorage "github.com/robinbryce/go-merklelog-fs/storage"
+	"github.com/forestrie/go-merklelog/massifs/storage"
+	fsstorage "github.com/forestrie/go-merklelog-fs/storage"
 	"github.com/urfave/cli/v2"
 	"github.com/veraison/go-cose"
 )

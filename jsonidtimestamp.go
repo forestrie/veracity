@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/datatrails/go-datatrails-merklelog/massifs"
+	"github.com/forestrie/go-merklelog/massifs"
 )
 
 // extractIDTimestamp safely recovers an idtimestamp from api response data.

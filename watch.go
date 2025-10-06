@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/datatrails/go-datatrails-common/logger"
-	"github.com/datatrails/go-datatrails-merklelog/massifs/storage"
-	azwatcher "github.com/robinbryce/go-merklelog-azure/watcher"
+	"github.com/forestrie/go-merklelog/massifs/storage"
+	azwatcher "github.com/forestrie/go-merklelog-azure/watcher"
 
 	// "github.com/datatrails/go-datatrails-common/azblob"
 	"github.com/urfave/cli/v2"

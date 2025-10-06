@@ -9,13 +9,13 @@ import (
 
 	"github.com/datatrails/go-datatrails-common-api-gen/assets/v2/assets"
 	"github.com/datatrails/go-datatrails-common/logger"
-	"github.com/datatrails/go-datatrails-merklelog/massifs"
-	"github.com/datatrails/go-datatrails-merklelog/mmr"
+	"github.com/forestrie/go-merklelog/massifs"
+	"github.com/forestrie/go-merklelog/mmr"
 	"github.com/datatrails/go-datatrails-simplehash/simplehash"
 	"github.com/datatrails/veracity"
 	"github.com/datatrails/veracity/tests/testcontext"
 	"github.com/forestrie/go-merklelog-datatrails/datatrails"
-	"github.com/robinbryce/go-merklelog-provider-testing/mmrtesting"
+	"github.com/forestrie/go-merklelog-provider-testing/mmrtesting"
 	"github.com/stretchr/testify/require"
 )
 

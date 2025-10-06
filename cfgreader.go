@@ -3,7 +3,7 @@ package veracity
 import (
 	"fmt"
 
-	"github.com/robinbryce/go-merklelog-azure/blobs"
+	"github.com/forestrie/go-merklelog-azure/blobs"
 	"github.com/urfave/cli/v2"
 )
 

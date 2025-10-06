@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/datatrails/go-datatrails-merklelog/massifs"
+	"github.com/forestrie/go-merklelog/massifs"
 	"github.com/forestrie/go-merklelog-datatrails/datatrails"
 	"github.com/urfave/cli/v2"
 )

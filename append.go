@@ -18,11 +18,11 @@ import (
 	"github.com/fxamacker/cbor/v2"
 	"github.com/veraison/go-cose"
 
-	"github.com/datatrails/go-datatrails-merklelog/massifs"
-	commoncbor "github.com/datatrails/go-datatrails-merklelog/massifs/cbor"
-	commoncose "github.com/datatrails/go-datatrails-merklelog/massifs/cose"
-	"github.com/datatrails/go-datatrails-merklelog/massifs/storage"
-	"github.com/datatrails/go-datatrails-merklelog/mmr"
+	"github.com/forestrie/go-merklelog/massifs"
+	commoncbor "github.com/forestrie/go-merklelog/massifs/cbor"
+	commoncose "github.com/forestrie/go-merklelog/massifs/cose"
+	"github.com/forestrie/go-merklelog/massifs/storage"
+	"github.com/forestrie/go-merklelog/mmr"
 	"github.com/datatrails/veracity/keyio"
 	"github.com/datatrails/veracity/scitt"
 	"github.com/urfave/cli/v2"
@@ -232,7 +232,7 @@ func NewAppendCmd() *cli.Command {
 			// Seal  a checkpoint for the locally forked ledger with a made up sealing key
 			// Receipts are rooted at a checkpoint accumulator state.
 			//
-			rootSigner := massifs.NewRootSigner("https://github.com/robinbryce/veracity", cmd.CBORCodec)
+			rootSigner := massifs.NewRootSigner("https://github.com/forestrie/veracity", cmd.CBORCodec)
 
 			// TODO: account for filling a massif
 			mmrSizeCurrent := verified.RangeCount()

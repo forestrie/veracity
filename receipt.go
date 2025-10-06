@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/datatrails/go-datatrails-merklelog/massifs"
+	"github.com/forestrie/go-merklelog/massifs"
 	"github.com/urfave/cli/v2"
 	"github.com/veraison/go-cose"
 )

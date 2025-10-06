@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/datatrails/go-datatrails-merklelog/massifs/cose"
+	"github.com/forestrie/go-merklelog/massifs/cose"
 )
 
 const (

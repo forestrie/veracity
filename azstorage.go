@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/robinbryce/go-merklelog-azure/blobs"
-	azstorage "github.com/robinbryce/go-merklelog-azure/storage"
+	"github.com/forestrie/go-merklelog-azure/blobs"
+	azstorage "github.com/forestrie/go-merklelog-azure/storage"
 	"github.com/urfave/cli/v2"
 )
 

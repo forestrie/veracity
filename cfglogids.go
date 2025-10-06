@@ -3,7 +3,7 @@ package veracity
 import (
 	"strings"
 
-	"github.com/datatrails/go-datatrails-merklelog/massifs/storage"
+	"github.com/forestrie/go-merklelog/massifs/storage"
 	"github.com/google/uuid"
 )
 

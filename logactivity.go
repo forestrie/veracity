@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/datatrails/go-datatrails-merklelog/massifs/watcher"
+	"github.com/forestrie/go-merklelog/massifs/watcher"
 )
 
 func FilePathToLogMassifs(filePath string) ([]watcher.LogMassif, error) {
