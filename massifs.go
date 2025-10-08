@@ -106,7 +106,10 @@ to produce the desired information computationaly produce
 				// massif.
 				peakStackIndices = PeakStack(height, firstMMRIndex)
 				peakStackStart := massifs.PeakStackStart(height)
-				logStart := massifs.PeakStackEnd(mi, height)
+
+				// Note: printing the table is specifically about the packed
+				// accumulator form, so we are always 'V0' here.
+				logStart := massifs.PeakStackEndV0(mi, height)
 
 				tableFmt := "|% 8d|% 8d|% 8d|% 8d|% 8d|% 8d|% 8d| [%s]"
 				plainFmt := "% 8d% 8d% 8d% 8d% 8d% 8d% 8d [%s]"

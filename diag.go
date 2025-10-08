@@ -56,7 +56,13 @@ func NewDiagCmd() *cli.Command {
 				massifIndex = uint32(massifs.MassifIndexFromMMRIndex(cmd.MassifFmt.MassifHeight, mmrIndex))
 			}
 			fmt.Printf("%8d peak-stack-len\n", massifs.PeakStackLen(uint64(massifIndex)))
-			logStart := massifs.PeakStackEnd(uint64(massifIndex), cmd.MassifFmt.MassifHeight)
+			var logStart uint64
+			switch massif.Start.Version {
+			case 1:
+				logStart = massifs.PeakStackEnd(cmd.MassifFmt.MassifHeight)
+			case 0:
+				logStart = massifs.PeakStackEndV0(uint64(massifIndex), cmd.MassifFmt.MassifHeight)
+			}
 			fmt.Printf("%8d tree-start\n", logStart)
 			fmt.Printf("%8d massif\n", massifIndex)
 			if mmrIndex > 0 {
