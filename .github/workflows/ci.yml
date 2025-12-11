@@ -49,9 +49,13 @@ jobs:
           exit 0
 
   systemtest:
-    name: Built binary tests
+    name: Built binary tests DISABLED (datatrails service is not currently accessible)
     runs-on: [ubuntu-latest]
     steps:
+      - name: Built binary tests
+        run: |
+          echo "Built binary tests disabled, the datatrails service is not currently accessible"
+          exit 0
       - uses: actions/checkout@v3
         with:
           # make tags available for the build
@@ -78,8 +82,10 @@ jobs:
 
       - name: Test the built binary
         run: |
-          echo "Veracity Installation Path: $VERACITY_INSTALL"
-          task test:binary
+          echo "Built binary tests disabled, the datatrails service is not currently accessible"
+          exit 0
+          #echo "Veracity Installation Path: $VERACITY_INSTALL"
+          #task test:binary
 
       - name: Publish Test Report
         uses: mikepenz/action-junit-report@v4
