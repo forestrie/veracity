@@ -41,10 +41,12 @@ jobs:
         run: |
           # Note: it is by design that we don't use the builder
           task test:integration
-      - name: DataTrails public log tests
+      - name: DataTrails public log tests DISABLED
         run: |
           # Note: it is by design that we don't use the builder
-          task test:datatrails:public
+          # task test:datatrails:public
+          echo "DataTrails public log tests disabled, the platform is not currently accessible"
+          exit 0
 
   systemtest:
     name: Built binary tests
