@@ -2,24 +2,14 @@ module github.com/datatrails/veracity
 
 go 1.24.0
 
-//replace (
-//	github.com/datatrails/go-datatrails-common => ../go-datatrails-common
-//	github.com/forestrie/go-merklelog-azure => ../go-merklelog-azure
-//	github.com/forestrie/go-merklelog-datatrails => ../go-merklelog-datatrails
-//	github.com/forestrie/go-merklelog-fs => ../go-merklelog-fs
-//	github.com/forestrie/go-merklelog-provider-testing => ../go-merklelog-provider-testing
-//	github.com/forestrie/go-merklelog/massifs => ../go-merklelog/massifs
-//	github.com/forestrie/go-merklelog/mmr => ../go-merklelog/mmr
-//)
-
 replace (
-	github.com/datatrails/go-datatrails-common => ../arbor/services/ranger/go-datatrails-common
-	github.com/forestrie/go-merklelog-azure => ../arbor/services/ranger/go-merklelog-azure
-	github.com/forestrie/go-merklelog-datatrails => ../arbor/services/ranger/go-merklelog-datatrails
-	github.com/forestrie/go-merklelog-fs => ../arbor/services/ranger/go-merklelog-fs
-	github.com/forestrie/go-merklelog-provider-testing => ../arbor/services/ranger/go-merklelog-provider-testing
-	github.com/forestrie/go-merklelog/massifs => ../arbor/services/ranger/go-merklelog/massifs
-	github.com/forestrie/go-merklelog/mmr => ../arbor/services/ranger/go-merklelog/mmr
+	github.com/datatrails/go-datatrails-common => ../go-datatrails-common
+	github.com/forestrie/go-merklelog-azure => ../go-merklelog-azure
+	github.com/forestrie/go-merklelog-datatrails => ../go-merklelog-datatrails
+	github.com/forestrie/go-merklelog-fs => ../go-merklelog-fs
+	github.com/forestrie/go-merklelog-provider-testing => ../go-merklelog-provider-testing
+	github.com/forestrie/go-merklelog/massifs => ../go-merklelog/massifs
+	github.com/forestrie/go-merklelog/mmr => ../go-merklelog/mmr
 )
 
 require (
