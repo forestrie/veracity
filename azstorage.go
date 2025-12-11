@@ -34,7 +34,12 @@ func NewCmdStorageProviderAzure(
 	opts := azstorage.Options{}
 	opts.Store = reader
 
-	store, err := azstorage.NewStore(ctx, opts)
+	massifHeight := cmd.MassifFmt.MassifHeight
+	if massifHeight == 0 {
+		massifHeight = DefaultMassifHeight
+	}
+
+	store, err := azstorage.NewStore(ctx, opts, massifHeight)
 	if err != nil {
 		return nil, fmt.Errorf("could not create Azure object store: %w", err)
 	}

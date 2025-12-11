@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/forestrie/go-merklelog/massifs"
-	"github.com/forestrie/go-merklelog/massifs/storage"
 	azstoragetesting "github.com/forestrie/go-merklelog-azure/tests/storage"
 	"github.com/forestrie/go-merklelog-provider-testing/mmrtesting"
+	"github.com/forestrie/go-merklelog/massifs"
+	"github.com/forestrie/go-merklelog/massifs/storage"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,8 +27,8 @@ func NewDefaultTestContext(t *testing.T, opts ...massifs.Option) *TestContext {
 	}
 }
 
-func NewLogBuilderFactory(tc *TestContext) mmrtesting.LogBuilder {
-	builder := azstoragetesting.NewLogBuilder(&tc.TestContext)
+func NewLogBuilderFactory(tc *TestContext, massifHeight uint8) mmrtesting.LogBuilder {
+	builder := azstoragetesting.NewLogBuilder(&tc.TestContext, massifHeight)
 	builder.LeafGenerator = mmrtesting.NewDataTrailsLeafGenerator(tc.GetG())
 	return builder
 }
@@ -49,7 +49,7 @@ func CreateLogContext(t *testing.T, massifHeight uint8, massifCount uint32, opts
 
 func CreateLogForContext(tc *TestContext, logID storage.LogID, massifHeight uint8, massifCount uint32) (mmrtesting.LogBuilder, mmrtesting.GeneratedLeaves) {
 
-	builder := NewLogBuilderFactory(tc)
+	builder := NewLogBuilderFactory(tc, massifHeight)
 	tc.DeleteLog(logID)
 	err := builder.SelectLog(tc.T.Context(), logID)
 	require.NoError(tc.T, err)
@@ -66,7 +66,7 @@ func CreateLogsForContext(tc *TestContext, massifHeight uint8, massifCount uint3
 	var builders []mmrtesting.LogBuilder
 
 	for _, logID := range logIDs {
-		builder := NewLogBuilderFactory(tc)
+		builder := NewLogBuilderFactory(tc, massifHeight)
 		tc.DeleteLog(logID)
 		err := builder.SelectLog(tc.T.Context(), logID)
 		if err != nil {

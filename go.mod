@@ -2,14 +2,24 @@ module github.com/datatrails/veracity
 
 go 1.24.0
 
+//replace (
+//	github.com/datatrails/go-datatrails-common => ../go-datatrails-common
+//	github.com/forestrie/go-merklelog-azure => ../go-merklelog-azure
+//	github.com/forestrie/go-merklelog-datatrails => ../go-merklelog-datatrails
+//	github.com/forestrie/go-merklelog-fs => ../go-merklelog-fs
+//	github.com/forestrie/go-merklelog-provider-testing => ../go-merklelog-provider-testing
+//	github.com/forestrie/go-merklelog/massifs => ../go-merklelog/massifs
+//	github.com/forestrie/go-merklelog/mmr => ../go-merklelog/mmr
+//)
+
 replace (
-	github.com/datatrails/go-datatrails-common => ../go-datatrails-common
-	github.com/forestrie/go-merklelog-azure => ../go-merklelog-azure
-	github.com/forestrie/go-merklelog-datatrails => ../go-merklelog-datatrails
-	github.com/forestrie/go-merklelog-fs => ../go-merklelog-fs
-	github.com/forestrie/go-merklelog-provider-testing => ../go-merklelog-provider-testing
-	github.com/forestrie/go-merklelog/massifs => ../go-merklelog/massifs
-	github.com/forestrie/go-merklelog/mmr => ../go-merklelog/mmr
+	github.com/datatrails/go-datatrails-common => ../arbor/services/ranger/go-datatrails-common
+	github.com/forestrie/go-merklelog-azure => ../arbor/services/ranger/go-merklelog-azure
+	github.com/forestrie/go-merklelog-datatrails => ../arbor/services/ranger/go-merklelog-datatrails
+	github.com/forestrie/go-merklelog-fs => ../arbor/services/ranger/go-merklelog-fs
+	github.com/forestrie/go-merklelog-provider-testing => ../arbor/services/ranger/go-merklelog-provider-testing
+	github.com/forestrie/go-merklelog/massifs => ../arbor/services/ranger/go-merklelog/massifs
+	github.com/forestrie/go-merklelog/mmr => ../arbor/services/ranger/go-merklelog/mmr
 )
 
 require (
@@ -17,11 +27,11 @@ require (
 	github.com/datatrails/go-datatrails-common-api-gen v0.8.0
 	github.com/datatrails/go-datatrails-serialization/eventsv1 v0.0.3
 	github.com/datatrails/go-datatrails-simplehash v0.2.0
-	github.com/forestrie/go-merklelog-azure v0.0.0-20250928182018-06ed158d48af
+	github.com/forestrie/go-merklelog-azure v0.1.0
 	github.com/forestrie/go-merklelog-datatrails v0.0.0
-	github.com/forestrie/go-merklelog-fs v0.0.0-20250928180927-a4773e335b22
+	github.com/forestrie/go-merklelog-fs v0.1.0
 	github.com/forestrie/go-merklelog-provider-testing v0.0.0-00010101000000-000000000000
-	github.com/forestrie/go-merklelog/massifs v0.0.2
+	github.com/forestrie/go-merklelog/massifs v0.1.0
 	github.com/forestrie/go-merklelog/mmr v0.4.0
 	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/google/uuid v1.6.0

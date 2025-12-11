@@ -3,15 +3,17 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/datatrails/go-datatrails-common/logger"
-	"github.com/forestrie/go-merklelog/mmr"
 	"github.com/datatrails/veracity"
 	"github.com/datatrails/veracity/tests/testcontext"
 	"github.com/forestrie/go-merklelog-datatrails/datatrails"
 	"github.com/forestrie/go-merklelog-provider-testing/mmrtesting"
+	"github.com/forestrie/go-merklelog/massifs"
+	"github.com/forestrie/go-merklelog/mmr"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -53,7 +55,7 @@ func (s *NodeSuite) TestVerifyIncludedMultiMassif() {
 		massifCount := tt.massifCount
 		s.Run(fmt.Sprintf("massifCount:%d", massifCount), func() {
 
-			tc, logID, _, generated := testcontext.CreateLogBuilderContext(
+			tc, logID, builder, _ := testcontext.CreateLogBuilderContext(
 				s.T(),
 				massifHeight,
 				tt.massifCount,
@@ -68,7 +70,16 @@ func (s *NodeSuite) TestVerifyIncludedMultiMassif() {
 
 				mmrIndex := mmr.MMRIndex(iLeaf)
 
-				err := app.Run([]string{
+				// Get the expected value directly from the massif context using the builder's ObjectReader
+				massifIndex := uint32(massifs.MassifIndexFromMMRIndex(massifHeight, mmrIndex))
+				massifCtx, err := massifs.GetMassifContext(context.Background(), builder.ObjectReader, massifIndex)
+				s.NoError(err, "should be able to get massif context for massif %d", massifIndex)
+
+				expectedValue, err := massifCtx.Get(mmrIndex)
+				s.NoError(err, "should be able to get value for mmrIndex %d", mmrIndex)
+				expectedValueHex := fmt.Sprintf("%x", expectedValue)
+
+				err = app.Run([]string{
 					"veracity",
 					"--envauth", // uses the emulator
 					"--container", tc.Cfg.Container,
@@ -81,9 +92,10 @@ func (s *NodeSuite) TestVerifyIncludedMultiMassif() {
 				s.NoError(err)
 
 				stdout := s.CaptureAndCloseStdout()
+				actualValue := strings.TrimSpace(stdout)
 
-				leafValue := fmt.Sprintf("%x", generated.Args[iLeaf].Value)
-				assert.Equal(s.T(), leafValue, strings.TrimSpace(stdout))
+				// Verify that the node command returns the same value as reading directly from massif context
+				assert.Equal(s.T(), expectedValueHex, actualValue, "node command value for leaf index %d (mmrIndex %d) should match value read directly from massif context", iLeaf, mmrIndex)
 			}
 		})
 	}

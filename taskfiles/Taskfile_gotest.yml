@@ -32,7 +32,28 @@ tasks:
         cmd: |
           cd $(dirname {{.MODULE}})
           mkdir -p {{.UNITTEST_DIR}}
-          go test \
+          VERACITY_SKIP_TLS_VERIFY=true go test \
+            {{.GO_TEST_TAGS}} \
+            -race \
+            -v \
+            -coverprofile={{.UNITTEST_DIR}}/main.out \
+            ./...
+          gocov convert {{.UNITTEST_DIR}}/main.out > {{.UNITTEST_DIR}}/coverage.json
+
+  go:integration:
+    desc: "run all integration tests (azurite and production)"
+    dir: ../
+    vars:
+      GO_TEST_TAGS: '{{.GO_TEST_TAGS | default "-tags integration"}}'
+      GO_MOD_DIRS:
+        sh: find . -type f -name 'go.mod'
+
+    cmds:
+      - for: { var: GO_MOD_DIRS, as: MODULE}
+        cmd: |
+          cd $(dirname {{.MODULE}})
+          mkdir -p {{.UNITTEST_DIR}}
+          VERACITY_SKIP_TLS_VERIFY=true go test \
             {{.GO_TEST_TAGS}} \
             -race \
             -v \
@@ -53,7 +74,7 @@ tasks:
         cmd: |
           cd $(dirname {{.MODULE}})
           mkdir -p {{.UNITTEST_DIR}}
-          go test \
+          VERACITY_SKIP_TLS_VERIFY=true go test \
             {{.GO_TEST_TAGS}} \
             -race \
             -v \

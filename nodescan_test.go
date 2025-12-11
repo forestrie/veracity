@@ -13,12 +13,12 @@ import (
 	"github.com/datatrails/go-datatrails-common-api-gen/assets/v2/assets"
 	v2assets "github.com/datatrails/go-datatrails-common-api-gen/assets/v2/assets"
 	"github.com/datatrails/go-datatrails-common/logger"
-	"github.com/forestrie/go-merklelog/massifs"
-	"github.com/forestrie/go-merklelog/mmr"
 	"github.com/datatrails/go-datatrails-simplehash/simplehash"
 	"github.com/datatrails/veracity/tests/testcontext"
 	"github.com/forestrie/go-merklelog-datatrails/datatrails"
 	"github.com/forestrie/go-merklelog-provider-testing/mmrtesting"
+	"github.com/forestrie/go-merklelog/massifs"
+	"github.com/forestrie/go-merklelog/mmr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -77,7 +77,7 @@ func TestNodeScanCmd(t *testing.T) {
 		// from that.
 		{testArgs: []string{
 			"<progname>", "-s", "devstoreaccount1", "-c", tc.Cfg.Container, "-t", tenantID,
-			"nodescan", "-m", "0", "-v", expectedLeafNodeValue}},
+			"--height", "8", "nodescan", "-m", "0", "-v", expectedLeafNodeValue}},
 	}
 
 	for _, tc := range tests {

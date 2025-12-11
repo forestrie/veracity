@@ -58,7 +58,8 @@ func NewDiagCmd() *cli.Command {
 			fmt.Printf("%8d peak-stack-len\n", massifs.PeakStackLen(uint64(massifIndex)))
 			var logStart uint64
 			switch massif.Start.Version {
-			case 1:
+			case 1, 2:
+				// Version 2 is compatible with version 1 for logStart calculation
 				logStart = massifs.PeakStackEnd(cmd.MassifFmt.MassifHeight)
 			case 0:
 				logStart = massifs.PeakStackEndV0(uint64(massifIndex), cmd.MassifFmt.MassifHeight)

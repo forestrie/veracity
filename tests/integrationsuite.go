@@ -2,13 +2,35 @@ package tests
 
 import (
 	"bytes"
+	"crypto/tls"
 	"io"
+	"net/http"
 	"os"
 
 	"github.com/datatrails/go-datatrails-common/logger"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
+
+const (
+	// SkipTLSVerifyEnvVar is the environment variable that, when set to "true",
+	// will configure HTTP clients to skip TLS certificate verification.
+	// This is useful for integration tests against services with expired or invalid certificates.
+	SkipTLSVerifyEnvVar = "VERACITY_SKIP_TLS_VERIFY"
+)
+
+func init() {
+	// Configure default HTTP transport to skip TLS verification if environment variable is set
+	// This runs early when the package is imported, before any HTTP clients are created
+	if os.Getenv(SkipTLSVerifyEnvVar) == "true" {
+		defaultTransport := http.DefaultTransport.(*http.Transport).Clone()
+		if defaultTransport.TLSClientConfig == nil {
+			defaultTransport.TLSClientConfig = &tls.Config{}
+		}
+		defaultTransport.TLSClientConfig.InsecureSkipVerify = true
+		http.DefaultTransport = defaultTransport
+	}
+}
 
 const (
 	// These constants are well known and described here:
@@ -65,6 +87,17 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	// capture this as early as possible
 	s.origStdin = os.Stdin
 	s.origStdout = os.Stdout
+
+	// Configure HTTP transport to skip TLS verification if environment variable is set
+	// This must be done before any Azure SDK clients are created
+	if os.Getenv(SkipTLSVerifyEnvVar) == "true" {
+		defaultTransport := http.DefaultTransport.(*http.Transport).Clone()
+		if defaultTransport.TLSClientConfig == nil {
+			defaultTransport.TLSClientConfig = &tls.Config{}
+		}
+		defaultTransport.TLSClientConfig.InsecureSkipVerify = true
+		http.DefaultTransport = defaultTransport
+	}
 }
 
 // EnsureAzuriteEnv ensures the environment variables for azurite are set
